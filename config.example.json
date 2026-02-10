@@ -1,3 +1,5 @@
 {
-  "google_translate_api_key": "REPLACE_ME"
+  "google_translate_api_key": "REPLACE_ME",
+  "media_dir": "/path/to/media",
+  "stt_endpoint": "https://stt.rtek.dev"
 }

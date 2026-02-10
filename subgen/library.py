@@ -27,7 +27,7 @@ def scan_media(base_dir: str) -> List[Dict[str, object]]:
 def describe_media(path: Path) -> Dict[str, object]:
     embedded = probe_embedded_subs(path)
     sidecar = find_sidecar_subs(path)
-    title = path.stem
+    title = probe_title(path) or path.stem
     return {
         "id": _hash_id(str(path)),
         "path": str(path),
@@ -74,6 +74,32 @@ def probe_embedded_subs(path: Path) -> List[Dict[str, object]]:
             }
         )
     return subs
+
+
+def probe_title(path: Path) -> Optional[str]:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format_tags=title",
+        "-of",
+        "json",
+        str(path),
+    ]
+    try:
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError:
+        return None
+    try:
+        payload = json.loads(output.decode("utf-8", errors="ignore"))
+    except json.JSONDecodeError:
+        return None
+    tags = payload.get("format", {}).get("tags", {}) or {}
+    title = tags.get("title")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    return None
 
 
 def find_sidecar_subs(path: Path) -> List[Dict[str, object]]:

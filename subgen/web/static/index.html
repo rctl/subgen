@@ -10,8 +10,8 @@
   <header class="header">
     <div class="brand">Subgen</div>
     <div class="path">
-      <label for="mediaPath">Media folder</label>
-      <input id="mediaPath" type="text" placeholder="/path/to/media" />
+      <label>Media folder</label>
+      <div id="mediaPath" class="path-value">/path/to/media</div>
       <button id="rescan">Scan</button>
     </div>
     <div class="search">
@@ -46,6 +46,7 @@
 
         <label>Existing subtitle</label>
         <select id="existingSub"></select>
+        <div id="existingList" class="existing-list"></div>
 
         <div class="hint">Generated subtitles are saved next to the video as <code>gen_[lang].srt</code>.</div>
       </div>

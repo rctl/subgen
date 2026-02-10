@@ -33,3 +33,5 @@ Run the web UI server:
 python -m subgen.web --media-dir /path/to/media --endpoint https://stt.rtek.dev
 ```
 Open `http://localhost:8080` to browse media, inspect subtitles, and generate `gen_[lang].srt` files.
+
+The web UI reads `media_dir` and `stt_endpoint` from `config.json` if CLI flags are not provided.

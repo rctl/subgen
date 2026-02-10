@@ -24,6 +24,19 @@ from .translate import translate_segments
 BYTES_PER_SAMPLE = 2  # s16le
 
 
+CONFIG_PATH = os.environ.get(
+    "SUBGEN_CONFIG_PATH", "/agent/workspace/repos/subgen/config.json"
+)
+
+
+def load_config() -> Dict[str, object]:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
 def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     app = Flask(__name__, static_folder="web/static")
     app.config["BASE_DIR"] = base_dir
@@ -40,12 +53,8 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     @app.route("/api/media")
     def api_media():
         base_dir_value = app.config["BASE_DIR"]
-        try:
-            media_path = resolve_media_path(base_dir_value, request.args.get("path"))
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
-        items = scan_media(media_path)
-        return jsonify({"base_dir": media_path, "items": items})
+        items = scan_media(base_dir_value)
+        return jsonify({"base_dir": base_dir_value, "items": items})
 
     @app.route("/api/media/describe", methods=["POST"])
     def api_media_describe():
@@ -288,13 +297,16 @@ def _read_chunk(reader, size: int) -> bytes:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Subgen web UI server.")
-    parser.add_argument("--media-dir", required=True, help="Base media directory to scan.")
-    parser.add_argument("--endpoint", default="https://stt.rtek.dev", help="STT server endpoint.")
+    parser.add_argument("--media-dir", default=None, help="Base media directory to scan.")
+    parser.add_argument("--endpoint", default=None, help="STT server endpoint.")
     parser.add_argument("--host", default="0.0.0.0", help="Listen host.")
     parser.add_argument("--port", type=int, default=8080, help="Listen port.")
     args = parser.parse_args()
 
-    app = create_app(args.media_dir, args.endpoint)
+    config = load_config()
+    media_dir = args.media_dir or config.get("media_dir") or "/agent/workspace/media_test"
+    endpoint = args.endpoint or config.get("stt_endpoint") or "https://stt.rtek.dev"
+    app = create_app(str(media_dir), str(endpoint))
     app.run(host=args.host, port=args.port)
     return 0
 

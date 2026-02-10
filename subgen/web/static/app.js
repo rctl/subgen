@@ -2,7 +2,7 @@ const mediaListEl = document.getElementById("mediaList");
 const searchInput = document.getElementById("searchInput");
 const statusEl = document.getElementById("status");
 const rescanBtn = document.getElementById("rescan");
-const mediaPathInput = document.getElementById("mediaPath");
+const mediaPathEl = document.getElementById("mediaPath");
 
 const modal = document.getElementById("modal");
 const modalTitle = document.getElementById("modalTitle");
@@ -11,6 +11,7 @@ const sourceLangInput = document.getElementById("sourceLang");
 const targetLangInput = document.getElementById("targetLang");
 const modeSelect = document.getElementById("mode");
 const existingSubSelect = document.getElementById("existingSub");
+const existingList = document.getElementById("existingList");
 const runGenerateBtn = document.getElementById("runGenerate");
 
 let mediaItems = [];
@@ -20,19 +21,16 @@ function setStatus(message) {
   statusEl.textContent = message;
 }
 
-async function fetchMedia(path = "") {
+async function fetchMedia() {
   setStatus("Scanning media...");
   const url = new URL("api/media", window.location.origin + window.location.pathname);
-  if (path) {
-    url.searchParams.set("path", path);
-  }
   const response = await fetch(url);
   const data = await response.json();
   if (data.error) {
     setStatus(`Error: ${data.error}`);
     return;
   }
-  mediaPathInput.value = data.base_dir;
+  mediaPathEl.textContent = data.base_dir;
   mediaItems = data.items || [];
   setStatus(`${mediaItems.length} videos found.`);
   renderList();
@@ -99,12 +97,14 @@ function openModal(item) {
 
 function populateExistingSubs(item) {
   existingSubSelect.innerHTML = "";
+  existingList.innerHTML = "";
   const subs = [...(item.sidecar_subs || []), ...(item.embedded_subs || [])];
   if (!subs.length) {
     const opt = document.createElement("option");
     opt.value = "";
     opt.textContent = "No existing subtitles";
     existingSubSelect.appendChild(opt);
+    existingList.textContent = "No existing subtitles found.";
     return;
   }
   subs.forEach((sub) => {
@@ -113,6 +113,9 @@ function populateExistingSubs(item) {
     const label = sub.kind === "embedded" ? "Embedded" : "Sidecar";
     opt.textContent = `${label}: ${sub.lang} (${sub.title})`;
     existingSubSelect.appendChild(opt);
+    const itemLine = document.createElement("div");
+    itemLine.textContent = `${label} • ${sub.lang} • ${sub.title}`;
+    existingList.appendChild(itemLine);
   });
 }
 
@@ -143,7 +146,7 @@ async function runGenerate() {
 }
 
 searchInput.addEventListener("input", renderList);
-rescanBtn.addEventListener("click", () => fetchMedia(mediaPathInput.value));
+rescanBtn.addEventListener("click", () => fetchMedia());
 closeModalBtn.addEventListener("click", () => modal.classList.add("hidden"));
 runGenerateBtn.addEventListener("click", runGenerate);
 
