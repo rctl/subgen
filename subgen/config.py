@@ -10,6 +10,7 @@ class Config:
     output_path: str
     endpoint: str
     api_key: Optional[str]
+    language: str
     chunk_seconds: int
     overlap_seconds: int
     sample_rate: int

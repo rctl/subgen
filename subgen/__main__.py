@@ -20,6 +20,7 @@ def parse_args() -> Config:
     parser.add_argument("--output", required=True, help="Path to output SRT file.")
     parser.add_argument("--endpoint", required=True, help="STT server base URL.")
     parser.add_argument("--api-key", default=None, help="Optional API key for STT server.")
+    parser.add_argument("--lang", default="en", help="Language code for transcription (default: en).")
     parser.add_argument("--chunk-seconds", type=int, default=30, help="Chunk size in seconds.")
     parser.add_argument("--overlap-seconds", type=int, default=3, help="Overlap size in seconds.")
     parser.add_argument("--sample-rate", type=int, default=16000, help="Audio sample rate.")
@@ -38,6 +39,7 @@ def parse_args() -> Config:
         output_path=args.output,
         endpoint=args.endpoint,
         api_key=args.api_key,
+        language=args.lang,
         chunk_seconds=args.chunk_seconds,
         overlap_seconds=args.overlap_seconds,
         sample_rate=args.sample_rate,
@@ -109,7 +111,7 @@ def main() -> int:
             config.endpoint,
             payload,
             config.sample_rate,
-            language="en",
+            language=config.language,
             api_key=config.api_key,
             timeout=config.timeout,
         )

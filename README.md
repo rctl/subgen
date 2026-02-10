@@ -16,5 +16,6 @@ pip install -r requirements.txt
 python -m subgen \
   --input /agent/workspace/jellyfin_sample.mkv \
   --output /agent/workspace/jellyfin_sample.srt \
-  --endpoint http://localhost:8000
+  --endpoint http://localhost:8000 \
+  --lang en
 ```
