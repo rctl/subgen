@@ -1,11 +1,11 @@
 # Local Subtitle Generator Plan (Python)
 
 ## Goal
-Build a local program that takes a video file in common Jellyfin-compatible formats (e.g., MKV, MP4, AVI), extracts audio, transcribes speech to English with timestamps, and outputs a subtitle file (SRT/VTT).
+Build a local program that takes a video file in common Jellyfin-compatible formats (e.g., MKV, MP4, AVI), extracts audio, transcribes speech with timestamps, and outputs an SRT subtitle file.
 
 ## Scope
 - Input: Single video file path
-- Output: Subtitle file with timings and text
+- Output: SRT subtitle file with timings and text
 - Local execution, no cloud dependency required
 - Primary languages: Swedish and Chinese, with configurable language selection
 
@@ -21,7 +21,7 @@ Build a local program that takes a video file in common Jellyfin-compatible form
 2. Extract audio to 16 kHz mono PCM (int16 LE)
 3. POST raw PCM bytes to `/transcribe` with `X-Sample-Rate: 16000` and target language
 4. Build subtitle segments
-5. Write `.srt` and optionally `.vtt`
+5. Write `.srt`
 6. Clean up temp artifacts
 
 ## Components
@@ -38,7 +38,7 @@ Build a local program that takes a video file in common Jellyfin-compatible form
   - `--endpoint` remote API base URL (expects `/transcribe`)
   - `--api-key` API token
   - `--lang` default `sv` (allow `zh`, `zh-CN`, `zh-TW`)
-  - `--format` `srt|vtt`
+  - `--format` `srt`
   - `--threads`
 
 ## Transcription Strategy
@@ -73,7 +73,7 @@ Build a local program that takes a video file in common Jellyfin-compatible form
 - Allow setting CPU threads where applicable
 - Use backpressure and bounded queues to cap memory for multi-hour videos
 - Write intermediate segment results to disk to avoid holding all segments in RAM
-- Support resume by persisting chunk offsets and completed segments
+- Support resume by persisting chunk offsets and completed segments under `/tmp` (crash-safe only)
 
 ## Testing Plan
 - Unit tests for subtitle formatting
