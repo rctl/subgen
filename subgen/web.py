@@ -39,7 +39,10 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     app = Flask(__name__, static_folder="web/static")
     app.config["BASE_DIR"] = base_dir
     app.config["STT_ENDPOINT"] = stt_endpoint
+    print(f"[subgen] config base_dir={base_dir} stt_endpoint={stt_endpoint}")
+    print("[subgen] scanning media library...")
     app.config["MEDIA_CACHE"] = scan_media(base_dir)
+    print(f"[subgen] scan complete: {len(app.config['MEDIA_CACHE'])} items")
 
     @app.route("/")
     def index():
@@ -54,7 +57,9 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
         base_dir_value = app.config["BASE_DIR"]
         rescan = request.args.get("rescan") == "1"
         if rescan:
+            print("[subgen] rescan requested")
             app.config["MEDIA_CACHE"] = scan_media(base_dir_value)
+            print(f"[subgen] scan complete: {len(app.config['MEDIA_CACHE'])} items")
         items = app.config.get("MEDIA_CACHE", [])
         return jsonify({"base_dir": base_dir_value, "items": items})
 
@@ -308,6 +313,8 @@ def main() -> int:
     config = load_config()
     media_dir = args.media_dir or config.get("media_dir") or "/agent/workspace/media_test"
     endpoint = args.endpoint or config.get("stt_endpoint") or "https://stt.rtek.dev"
+    print(f"[subgen] using config_path={CONFIG_PATH}")
+    print(f"[subgen] config values: media_dir={media_dir} stt_endpoint={endpoint}")
     app = create_app(str(media_dir), str(endpoint))
     app.run(host=args.host, port=args.port)
     return 0
