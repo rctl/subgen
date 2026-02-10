@@ -24,9 +24,7 @@ from .translate import translate_segments
 BYTES_PER_SAMPLE = 2  # s16le
 
 
-CONFIG_PATH = os.environ.get(
-    "SUBGEN_CONFIG_PATH", "/agent/workspace/repos/subgen/config.json"
-)
+CONFIG_PATH = os.environ.get("SUBGEN_CONFIG_PATH", os.path.join(os.getcwd(), "config.json"))
 
 
 def load_config() -> Dict[str, object]:
