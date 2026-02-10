@@ -24,15 +24,20 @@ from .translate import translate_segments
 BYTES_PER_SAMPLE = 2  # s16le
 
 
-CONFIG_PATH = os.environ.get("SUBGEN_CONFIG_PATH", os.path.join(os.getcwd(), "config.json"))
+CONFIG_PATH = os.environ.get("SUBGEN_CONFIG_PATH", "/app/config.json")
+FALLBACK_CONFIG_PATH = os.path.join(os.getcwd(), "config.json")
 
 
 def load_config() -> Dict[str, object]:
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
-            return json.load(handle)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    for path in (CONFIG_PATH, FALLBACK_CONFIG_PATH):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                return json.load(handle)
+        except FileNotFoundError:
+            continue
+        except json.JSONDecodeError:
+            return {}
+    return {}
 
 
 def create_app(base_dir: str, stt_endpoint: str) -> Flask:
@@ -314,6 +319,7 @@ def main() -> int:
     media_dir = args.media_dir or config.get("media_dir") or "/agent/workspace/media_test"
     endpoint = args.endpoint or config.get("stt_endpoint") or "https://stt.rtek.dev"
     print(f"[subgen] using config_path={CONFIG_PATH}")
+    print(f"[subgen] fallback config_path={FALLBACK_CONFIG_PATH}")
     print(f"[subgen] config values: media_dir={media_dir} stt_endpoint={endpoint}")
     app = create_app(str(media_dir), str(endpoint))
     app.run(host=args.host, port=args.port)
