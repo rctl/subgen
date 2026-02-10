@@ -9,10 +9,13 @@ const modalTitle = document.getElementById("modalTitle");
 const closeModalBtn = document.getElementById("closeModal");
 const sourceLangInput = document.getElementById("sourceLang");
 const targetLangInput = document.getElementById("targetLang");
+const translateTargetLangInput = document.getElementById("translateTargetLang");
 const modeSelect = document.getElementById("mode");
 const existingSubSelect = document.getElementById("existingSub");
 const existingList = document.getElementById("existingList");
 const runGenerateBtn = document.getElementById("runGenerate");
+const transcribeFields = document.getElementById("transcribeFields");
+const translateFields = document.getElementById("translateFields");
 
 let mediaItems = [];
 let currentMedia = null;
@@ -90,8 +93,10 @@ function openModal(item) {
   modalTitle.textContent = `Generate Subtitle: ${item.title}`;
   sourceLangInput.value = "";
   targetLangInput.value = "";
-  modeSelect.value = "use_existing";
+  translateTargetLangInput.value = "";
+  modeSelect.value = "transcribe";
   populateExistingSubs(item);
+  toggleModeFields();
   modal.classList.remove("hidden");
 }
 
@@ -122,13 +127,25 @@ function populateExistingSubs(item) {
 async function runGenerate() {
   if (!currentMedia) return;
   setStatus("Generating subtitles...");
-  const payload = {
-    media_path: currentMedia.path,
-    source_lang: sourceLangInput.value.trim(),
-    target_lang: targetLangInput.value.trim(),
-    mode: modeSelect.value,
-    existing_sub_id: existingSubSelect.value || null,
-  };
+  let payload = { media_path: currentMedia.path };
+  if (modeSelect.value === "translate") {
+    payload = {
+      ...payload,
+      mode: "translate_existing",
+      target_lang: translateTargetLangInput.value.trim(),
+      existing_sub_id: existingSubSelect.value || null,
+    };
+  } else {
+    const sourceLang = sourceLangInput.value.trim();
+    const targetLang = targetLangInput.value.trim() || sourceLang;
+    payload = {
+      ...payload,
+      mode: "transcribe",
+      source_lang: sourceLang,
+      target_lang: targetLang,
+      existing_sub_id: null,
+    };
+  }
 
   const response = await fetch("api/subtitles/generate", {
     method: "POST",
@@ -149,5 +166,12 @@ searchInput.addEventListener("input", renderList);
 rescanBtn.addEventListener("click", () => fetchMedia());
 closeModalBtn.addEventListener("click", () => modal.classList.add("hidden"));
 runGenerateBtn.addEventListener("click", runGenerate);
+modeSelect.addEventListener("change", toggleModeFields);
 
 fetchMedia();
+
+function toggleModeFields() {
+  const isTranslate = modeSelect.value === "translate";
+  translateFields.classList.toggle("hidden", !isTranslate);
+  transcribeFields.classList.toggle("hidden", isTranslate);
+}
