@@ -17,5 +17,11 @@ python -m subgen \
   --input /agent/workspace/jellyfin_sample.mkv \
   --output /agent/workspace/jellyfin_sample.srt \
   --endpoint http://localhost:8000 \
-  --lang en
+  --lang en \
+  --translate-to sv
 ```
+
+Translation notes:
+- Set `ANTHROPIC_API_KEY` or pass `--anthropic-api-key`.
+- Translated output is written to `output.{lang}.srt` (e.g., `movie.sv.srt`).
+- If the original `output.srt` already exists, STT is skipped unless `--force-stt` is used.

@@ -37,3 +37,40 @@ def format_srt(segments: Iterable[Dict[str, object]]) -> str:
         lines.append("")
         index += 1
     return "\n".join(lines).rstrip() + "\n"
+
+
+def parse_srt(text: str) -> List[Dict[str, object]]:
+    blocks = [block for block in text.split("\n\n") if block.strip()]
+    segments: List[Dict[str, object]] = []
+    for block in blocks:
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if len(lines) < 2:
+            continue
+        time_line = lines[1]
+        if "-->" not in time_line:
+            continue
+        start_raw, end_raw = [part.strip() for part in time_line.split("-->", 1)]
+        try:
+            start = _parse_timestamp(start_raw)
+            end = _parse_timestamp(end_raw)
+        except ValueError:
+            continue
+        text_lines = lines[2:] if len(lines) > 2 else []
+        segment_text = "\n".join(text_lines).strip()
+        if not segment_text:
+            continue
+        segments.append({"start": start, "end": end, "text": segment_text})
+    return segments
+
+
+def _parse_timestamp(value: str) -> float:
+    parts = value.split(",")
+    if len(parts) != 2:
+        raise ValueError("Invalid timestamp")
+    time_part, ms_part = parts
+    hours_str, minutes_str, seconds_str = time_part.split(":")
+    hours = int(hours_str)
+    minutes = int(minutes_str)
+    seconds = int(seconds_str)
+    millis = int(ms_part)
+    return hours * 3600 + minutes * 60 + seconds + (millis / 1000.0)
