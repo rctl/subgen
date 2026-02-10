@@ -1,4 +1,4 @@
-# Local Subtitle Generator Plan (Go)
+# Local Subtitle Generator Plan (Python)
 
 ## Goal
 Build a local program that takes a video file in common Jellyfin-compatible formats (e.g., MKV, MP4, AVI), extracts audio, transcribes speech to English with timestamps, and outputs a subtitle file (SRT/VTT).
@@ -10,8 +10,9 @@ Build a local program that takes a video file in common Jellyfin-compatible form
 - Primary languages: Swedish and Chinese, with configurable language selection
 
 ## Proposed Stack
-- Language: Go
+- Language: Python
 - Media handling: FFmpeg (CLI) for audio extraction
+- HTTP client: `httpx` or `requests`
 - Transcription: Remote speech-to-text service compatible with Jarvis `stt-server`
 - Subtitle output: SRT and VTT writers
 
@@ -24,14 +25,14 @@ Build a local program that takes a video file in common Jellyfin-compatible form
 6. Clean up temp artifacts
 
 ## Components
-- `cmd/subgen`: CLI entry point
-- `internal/media`: FFmpeg wrapper (audio extraction)
-- `internal/transcribe`: Jarvis `stt-server` API client and timestamp parsing
-- `internal/subtitles`: SRT/VTT generation
-- `internal/config`: CLI flags and defaults
+- `subgen/__main__.py`: CLI entry point
+- `subgen/media.py`: FFmpeg wrapper (audio extraction)
+- `subgen/transcribe.py`: Jarvis `stt-server` API client and timestamp parsing
+- `subgen/subtitles.py`: SRT/VTT generation
+- `subgen/config.py`: CLI flags and defaults
 
 ## CLI Design
-- `subgen --input /path/video.mkv --output /path/video.srt`
+- `python -m subgen --input /path/video.mkv --output /path/video.srt`
 - Optional flags:
   - `--model` remote model name or ID (if supported by server)
   - `--endpoint` remote API base URL (expects `/transcribe`)
@@ -69,7 +70,7 @@ Build a local program that takes a video file in common Jellyfin-compatible form
 ## Performance Considerations
 - Stream extraction and transcription in chunks
 - Cache extracted audio if re-running
-- Allow setting CPU threads
+- Allow setting CPU threads where applicable
 
 ## Testing Plan
 - Unit tests for subtitle formatting
