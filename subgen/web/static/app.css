@@ -185,19 +185,7 @@ main {
   color: var(--muted);
 }
 
-.existing-list {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 12px;
-  color: var(--muted);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 140px;
-  overflow: auto;
-}
+ 
 
 @media (max-width: 900px) {
   .header {

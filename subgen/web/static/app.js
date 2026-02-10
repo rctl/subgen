@@ -11,7 +11,6 @@ const targetLangInput = document.getElementById("targetLang");
 const translateTargetLangInput = document.getElementById("translateTargetLang");
 const modeSelect = document.getElementById("mode");
 const existingSubSelect = document.getElementById("existingSub");
-const existingList = document.getElementById("existingList");
 const runGenerateBtn = document.getElementById("runGenerate");
 const transcribeFields = document.getElementById("transcribeFields");
 const translateFields = document.getElementById("translateFields");
@@ -89,9 +88,9 @@ function renderList() {
 function openModal(item) {
   currentMedia = item;
   modalTitle.textContent = `Generate Subtitle: ${item.title}`;
-  sourceLangInput.value = "";
-  targetLangInput.value = "";
-  translateTargetLangInput.value = "";
+  sourceLangInput.value = sourceLangInput.value || "sv";
+  targetLangInput.value = targetLangInput.value || "sv";
+  translateTargetLangInput.value = translateTargetLangInput.value || "en";
   modeSelect.value = "transcribe";
   populateExistingSubs(item);
   toggleModeFields();
@@ -100,14 +99,12 @@ function openModal(item) {
 
 function populateExistingSubs(item) {
   existingSubSelect.innerHTML = "";
-  existingList.innerHTML = "";
   const subs = [...(item.sidecar_subs || []), ...(item.embedded_subs || [])];
   if (!subs.length) {
     const opt = document.createElement("option");
     opt.value = "";
     opt.textContent = "No existing subtitles";
     existingSubSelect.appendChild(opt);
-    existingList.textContent = "No existing subtitles found.";
     return;
   }
   subs.forEach((sub) => {
@@ -116,9 +113,6 @@ function populateExistingSubs(item) {
     const label = sub.kind === "embedded" ? "Embedded" : "Sidecar";
     opt.textContent = `${label}: ${sub.lang} (${sub.title})`;
     existingSubSelect.appendChild(opt);
-    const itemLine = document.createElement("div");
-    itemLine.textContent = `${label} • ${sub.lang} • ${sub.title}`;
-    existingList.appendChild(itemLine);
   });
 }
 
@@ -167,9 +161,49 @@ runGenerateBtn.addEventListener("click", runGenerate);
 modeSelect.addEventListener("change", toggleModeFields);
 
 fetchMedia();
+populateLanguageOptions();
 
 function toggleModeFields() {
   const isTranslate = modeSelect.value === "translate";
   translateFields.classList.toggle("hidden", !isTranslate);
   transcribeFields.classList.toggle("hidden", isTranslate);
+}
+
+function populateLanguageOptions() {
+  const languages = [
+    { code: "en", label: "English" },
+    { code: "sv", label: "Swedish" },
+    { code: "zh", label: "Chinese" },
+    { code: "es", label: "Spanish" },
+    { code: "fr", label: "French" },
+    { code: "de", label: "German" },
+    { code: "it", label: "Italian" },
+    { code: "pt", label: "Portuguese" },
+    { code: "nl", label: "Dutch" },
+    { code: "no", label: "Norwegian" },
+    { code: "da", label: "Danish" },
+    { code: "fi", label: "Finnish" },
+    { code: "pl", label: "Polish" },
+    { code: "cs", label: "Czech" },
+    { code: "el", label: "Greek" },
+    { code: "ja", label: "Japanese" },
+    { code: "ko", label: "Korean" },
+  ];
+
+  function fill(select) {
+    select.innerHTML = "";
+    languages.forEach((lang) => {
+      const opt = document.createElement("option");
+      opt.value = lang.code;
+      opt.textContent = `${lang.label} (${lang.code})`;
+      select.appendChild(opt);
+    });
+  }
+
+  fill(sourceLangInput);
+  fill(targetLangInput);
+  fill(translateTargetLangInput);
+  sourceLangInput.value = "sv";
+  targetLangInput.value = "sv";
+  translateTargetLangInput.value = "en";
 }

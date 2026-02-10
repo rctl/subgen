@@ -37,19 +37,18 @@
 
         <div id="transcribeFields">
           <label>Source language</label>
-          <input id="sourceLang" type="text" placeholder="sv" />
+          <select id="sourceLang"></select>
 
           <label>Destination language</label>
-          <input id="targetLang" type="text" placeholder="en" />
+          <select id="targetLang"></select>
         </div>
 
         <div id="translateFields" class="hidden">
           <label>Existing subtitle</label>
           <select id="existingSub"></select>
-          <div id="existingList" class="existing-list"></div>
 
           <label>Destination language</label>
-          <input id="translateTargetLang" type="text" placeholder="en" />
+          <select id="translateTargetLang"></select>
         </div>
 
         <div class="hint">Generated subtitles are saved next to the video as <code>gen_[lang].srt</code>.</div>
