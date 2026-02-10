@@ -115,6 +115,12 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
             return jsonify({"error": "Job not found"}), 404
         return jsonify(job)
 
+    @app.route("/api/jobs")
+    def api_jobs_list():
+        jobs = list(app.config["JOBS"].values())
+        jobs.sort(key=lambda item: item.get("created_at", 0), reverse=True)
+        return jsonify({"jobs": jobs})
+
     return app
 
 

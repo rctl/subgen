@@ -21,6 +21,7 @@ let mediaItems = [];
 let currentMedia = null;
 let scanStatusTimer = null;
 let scanWasRunning = false;
+let jobPollTimer = null;
 
 function setStatus(message) {
   statusEl.textContent = message;
@@ -203,6 +204,7 @@ modeSelect.addEventListener("change", toggleModeFields);
 fetchMedia();
 populateLanguageOptions();
 scanStatusTimer = setInterval(fetchScanStatus, 1500);
+jobPollTimer = setInterval(pollLatestJob, 2000);
 
 function toggleModeFields() {
   const isTranslate = modeSelect.value === "translate";
@@ -288,4 +290,15 @@ async function pollJob(jobId) {
   }
   setGenerateState(false);
   fetchMedia(false);
+}
+
+async function pollLatestJob() {
+  const response = await fetch("api/jobs");
+  const data = await response.json();
+  const jobs = data.jobs || [];
+  if (!jobs.length) return;
+  const active = jobs.find((job) => job.status === "running" || job.status === "queued");
+  if (active) {
+    pollJob(active.id);
+  }
 }
