@@ -22,6 +22,6 @@ python -m subgen \
 ```
 
 Translation notes:
-- Set `ANTHROPIC_API_KEY` or pass `--anthropic-api-key`.
+- Set `GOOGLE_TRANSLATE_API_KEY` or pass `--google-api-key`.
 - Translated output is written to `output.{lang}.srt` (e.g., `movie.sv.srt`).
 - If the original `output.srt` already exists, STT is skipped unless `--force-stt` is used.

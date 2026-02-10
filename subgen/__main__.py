@@ -28,14 +28,14 @@ def parse_args() -> Config:
         help="Optional target language code for translation (e.g., sv, zh).",
     )
     parser.add_argument(
-        "--anthropic-api-key",
+        "--translate-from",
         default=None,
-        help="Anthropic API key for translation (or set ANTHROPIC_API_KEY).",
+        help="Optional source language code for translation (e.g., en).",
     )
     parser.add_argument(
-        "--anthropic-model",
-        default="claude-3-haiku-20240307",
-        help="Anthropic model to use for translation.",
+        "--google-api-key",
+        default=None,
+        help="Google Translate API key (or set GOOGLE_TRANSLATE_API_KEY).",
     )
     parser.add_argument(
         "--translate-batch-size",
@@ -68,8 +68,8 @@ def parse_args() -> Config:
         api_key=args.api_key,
         language=args.lang,
         translate_to=args.translate_to,
-        anthropic_api_key=args.anthropic_api_key,
-        anthropic_model=args.anthropic_model,
+        translate_from=args.translate_from,
+        google_api_key=args.google_api_key,
         translate_batch_size=args.translate_batch_size,
         force_stt=args.force_stt,
         chunk_seconds=args.chunk_seconds,
@@ -193,12 +193,12 @@ def main() -> int:
         print(f"Wrote {len(segments)} segments to {config.output_path}")
 
     if config.translate_to:
-        api_key = config.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
+        api_key = config.google_api_key or os.getenv("GOOGLE_TRANSLATE_API_KEY")
         translated = translate_segments(
             segments,
             config.translate_to,
             api_key=api_key,
-            model=config.anthropic_model,
+            source_language=config.translate_from,
             batch_size=config.translate_batch_size,
             timeout=config.timeout,
         )

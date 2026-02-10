@@ -12,8 +12,8 @@ class Config:
     api_key: Optional[str]
     language: str
     translate_to: Optional[str]
-    anthropic_api_key: Optional[str]
-    anthropic_model: str
+    translate_from: Optional[str]
+    google_api_key: Optional[str]
     translate_batch_size: int
     force_stt: bool
     chunk_seconds: int

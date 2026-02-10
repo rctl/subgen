@@ -1,24 +1,23 @@
 from __future__ import annotations
 
-import json
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 import requests
 
 
-ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
+GOOGLE_TRANSLATE_ENDPOINT = "https://translation.googleapis.com/language/translate/v2"
 
 
 def translate_segments(
     segments: Iterable[Dict[str, object]],
     target_language: str,
     api_key: str,
-    model: str = "claude-3-haiku-20240307",
+    source_language: Optional[str] = None,
     batch_size: int = 30,
     timeout: int = 120,
 ) -> List[Dict[str, object]]:
     if not api_key:
-        raise ValueError("Anthropic API key is required for translation.")
+        raise ValueError("Google Translate API key is required for translation.")
 
     segment_list = list(segments)
     translated: List[Dict[str, object]] = []
@@ -26,14 +25,22 @@ def translate_segments(
         batch = segment_list[start : start + batch_size]
         texts = [str(item.get("text", "")).strip() for item in batch]
         translated_texts = _translate_batch(
-            texts, target_language, api_key, model=model, timeout=timeout
+            texts,
+            target_language,
+            api_key,
+            source_language=source_language,
+            timeout=timeout,
         )
         if len(translated_texts) != len(batch):
             translated_texts = []
             for line in texts:
                 translated_texts.append(
                     _translate_single(
-                        line, target_language, api_key, model=model, timeout=timeout
+                        line,
+                        target_language,
+                        api_key,
+                        source_language=source_language,
+                        timeout=timeout,
                     )
                 )
         for original, new_text in zip(batch, translated_texts):
@@ -51,70 +58,45 @@ def _translate_batch(
     texts: List[str],
     target_language: str,
     api_key: str,
-    model: str,
+    source_language: Optional[str],
     timeout: int,
 ) -> List[str]:
-    prompt = {
-        "role": "user",
-        "content": (
-            "Translate the following subtitle lines into "
-            f"{target_language}. Preserve meaning, keep each line concise, and return "
-            "only a JSON array of strings in the same order. "
-            "If an input line is empty, return an empty string at that position. "
-            "Do not add commentary.\n\n"
-            f"{json.dumps(texts, ensure_ascii=False)}"
-        ),
-    }
-    payload = {
-        "model": model,
-        "max_tokens": 2000,
-        "temperature": 0.2,
-        "messages": [prompt],
-    }
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
+    payload = {"q": texts, "target": target_language, "format": "text"}
+    if source_language:
+        payload["source"] = source_language
+    headers = {"content-type": "application/json"}
     response = requests.post(
-        ANTHROPIC_ENDPOINT,
+        GOOGLE_TRANSLATE_ENDPOINT,
         headers=headers,
-        data=json.dumps(payload),
+        params={"key": api_key},
+        json=payload,
         timeout=timeout,
     )
     if response.status_code >= 400:
-        raise RuntimeError(f"Anthropic error {response.status_code}: {response.text}")
-    try:
-        data = response.json()
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Anthropic returned invalid JSON: {exc}") from exc
-    content = data.get("content", [])
-    if not content or not isinstance(content, list):
-        raise RuntimeError("Anthropic response missing content.")
-    text = ""
-    for item in content:
-        if isinstance(item, dict) and item.get("type") == "text":
-            text += item.get("text", "")
-    text = text.strip()
-    try:
-        translated = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Translation was not valid JSON: {exc}\n{text}") from exc
-    if not isinstance(translated, list):
-        raise RuntimeError("Translation response was not a JSON array.")
-    return [str(entry).strip() for entry in translated]
+        raise RuntimeError(f"Google Translate error {response.status_code}: {response.text}")
+    data = response.json()
+    if not isinstance(data, dict):
+        raise RuntimeError("Google Translate response was not a JSON object.")
+    translations = data.get("data", {}).get("translations", [])
+    if not isinstance(translations, list):
+        raise RuntimeError("Google Translate response missing translations.")
+    return [str(item.get("translatedText", "")).strip() for item in translations]
 
 
 def _translate_single(
     text: str,
     target_language: str,
     api_key: str,
-    model: str,
+    source_language: Optional[str],
     timeout: int,
 ) -> str:
     if not text:
         return ""
     translated = _translate_batch(
-        [text], target_language, api_key, model=model, timeout=timeout
+        [text],
+        target_language,
+        api_key,
+        source_language=source_language,
+        timeout=timeout,
     )
     return translated[0] if translated else ""
