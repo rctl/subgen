@@ -29,26 +29,36 @@
         <button id="closeModal">✕</button>
       </div>
       <div class="modal-body">
-        <label>Mode</label>
-        <select id="mode">
-          <option value="transcribe">Transcribe</option>
-          <option value="translate">Translate</option>
-        </select>
+          <div class="field">
+            <div class="label">Mode</div>
+            <select id="mode">
+              <option value="transcribe">Transcribe</option>
+              <option value="translate">Translate</option>
+            </select>
+          </div>
 
         <div id="transcribeFields">
-          <label>Source language</label>
-          <select id="sourceLang"></select>
+          <div class="field">
+            <div class="label">Source language</div>
+            <select id="sourceLang"></select>
+          </div>
 
-          <label>Destination language</label>
-          <select id="targetLang"></select>
+          <div class="field">
+            <div class="label">Destination language</div>
+            <select id="targetLang"></select>
+          </div>
         </div>
 
         <div id="translateFields" class="hidden">
-          <label>Existing subtitle</label>
-          <select id="existingSub"></select>
+          <div class="field">
+            <div class="label">Existing subtitle</div>
+            <select id="existingSub"></select>
+          </div>
 
-          <label>Destination language</label>
-          <select id="translateTargetLang"></select>
+          <div class="field">
+            <div class="label">Destination language</div>
+            <select id="translateTargetLang"></select>
+          </div>
         </div>
 
         <div class="hint">Generated subtitles are saved next to the video as <code>gen_[lang].srt</code>.</div>

@@ -91,7 +91,8 @@ function openModal(item) {
   sourceLangInput.value = sourceLangInput.value || "sv";
   targetLangInput.value = targetLangInput.value || "sv";
   translateTargetLangInput.value = translateTargetLangInput.value || "en";
-  modeSelect.value = "transcribe";
+  const hasSubs = (item.sidecar_subs?.length || 0) + (item.embedded_subs?.length || 0) > 0;
+  modeSelect.value = hasSubs ? "translate" : "transcribe";
   populateExistingSubs(item);
   toggleModeFields();
   modal.classList.remove("hidden");
