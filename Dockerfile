@@ -17,4 +17,4 @@ ENV SUBGEN_PORT=8080
 
 EXPOSE 8080
 
-CMD ["python", "-m", "subgen.web", "--media-dir", "/media", "--endpoint", "https://stt.rtek.dev", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "subgen.web", "--host", "0.0.0.0", "--port", "8080"]
