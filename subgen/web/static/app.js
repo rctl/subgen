@@ -17,16 +17,18 @@ const translateFields = document.getElementById("translateFields");
 
 let mediaItems = [];
 let currentMedia = null;
+let scanStatusTimer = null;
+let scanWasRunning = false;
 
 function setStatus(message) {
   statusEl.textContent = message;
 }
 
 async function fetchMedia(rescan = false) {
-  setStatus("Scanning media...");
   const url = new URL("api/media", window.location.origin + window.location.pathname);
   if (rescan) {
     url.searchParams.set("rescan", "1");
+    setStatus("Rescan started...");
   }
   const response = await fetch(url);
   const data = await response.json();
@@ -35,8 +37,39 @@ async function fetchMedia(rescan = false) {
     return;
   }
   mediaItems = data.items || [];
-  setStatus(`${mediaItems.length} videos found.`);
+  updateScanStatus(data.scan);
+  scanWasRunning = Boolean(data.scan && data.scan.running);
   renderList();
+}
+
+async function fetchScanStatus() {
+  const url = new URL("api/scan-status", window.location.origin + window.location.pathname);
+  const response = await fetch(url);
+  const data = await response.json();
+  updateScanStatus(data);
+  if (!data.running && scanWasRunning) {
+    fetchMedia(false);
+  }
+  scanWasRunning = Boolean(data.running);
+}
+
+function updateScanStatus(scan) {
+  if (!scan) {
+    setStatus(`${mediaItems.length} videos found.`);
+    return;
+  }
+  if (scan.running) {
+    const total = Number(scan.total_files || 0);
+    const scanned = Number(scan.scanned_files || 0);
+    const percent = total > 0 ? Math.floor((scanned / total) * 100) : 0;
+    setStatus(
+      `Scanning media: ${scanned}/${total || "?"} files (${percent}%), videos found: ${scan.scanned_videos || 0}`
+    );
+  } else if (scan.error) {
+    setStatus(`Scan failed: ${scan.error}`);
+  } else {
+    setStatus(`${mediaItems.length} videos found.`);
+  }
 }
 
 function renderList() {
@@ -155,7 +188,7 @@ async function runGenerate() {
     setStatus(`Generated: ${data.outputs?.join(", ") || ""}`);
   }
   modal.classList.add("hidden");
-  fetchMedia(mediaPathInput.value);
+  fetchMedia(false);
 }
 
 searchInput.addEventListener("input", renderList);
@@ -166,6 +199,7 @@ modeSelect.addEventListener("change", toggleModeFields);
 
 fetchMedia();
 populateLanguageOptions();
+scanStatusTimer = setInterval(fetchScanStatus, 1500);
 
 function toggleModeFields() {
   const isTranslate = modeSelect.value === "translate";

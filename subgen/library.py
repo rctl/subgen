@@ -5,22 +5,39 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".webm"}
 SUBTITLE_EXTENSIONS = {".srt", ".vtt", ".ass", ".ssa", ".sub"}
 
 
-def scan_media(base_dir: str) -> List[Dict[str, object]]:
+def scan_media(
+    base_dir: str,
+    progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
+) -> List[Dict[str, object]]:
     base_path = Path(base_dir).resolve()
     items: List[Dict[str, object]] = []
+    total_files = _count_files(base_path)
+    scanned_files = 0
+    scanned_videos = 0
     for root, _, files in os.walk(base_path):
         for name in files:
             path = Path(root) / name
-            if path.suffix.lower() not in VIDEO_EXTENSIONS:
-                continue
-            items.append(describe_media(path))
+            scanned_files += 1
+            is_video = path.suffix.lower() in VIDEO_EXTENSIONS
+            if is_video:
+                scanned_videos += 1
+                items.append(describe_media(path))
+            if progress_callback:
+                progress_callback(
+                    {
+                        "total_files": total_files,
+                        "scanned_files": scanned_files,
+                        "scanned_videos": scanned_videos,
+                        "current_file": str(path),
+                    }
+                )
     return sorted(items, key=lambda item: str(item.get("title", "")).lower())
 
 
@@ -168,3 +185,10 @@ def _lang_from_filename(base: str, filename: str) -> Optional[str]:
     candidate = parts[0]
     candidate = candidate.replace("gen_", "")
     return candidate or None
+
+
+def _count_files(base_path: Path) -> int:
+    total = 0
+    for _, _, files in os.walk(base_path):
+        total += len(files)
+    return total

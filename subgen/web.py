@@ -4,6 +4,8 @@ import argparse
 import json
 import os
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -48,10 +50,19 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     app = Flask(__name__, static_folder="web/static")
     app.config["BASE_DIR"] = base_dir
     app.config["STT_ENDPOINT"] = stt_endpoint
+    app.config["MEDIA_CACHE"] = []
+    app.config["SCAN_LOCK"] = threading.Lock()
+    app.config["SCAN_STATE"] = {
+        "running": False,
+        "total_files": 0,
+        "scanned_files": 0,
+        "scanned_videos": 0,
+        "current_file": "",
+        "error": "",
+        "last_completed_at": None,
+    }
     print(f"[subgen] config base_dir={base_dir} stt_endpoint={stt_endpoint}")
-    print("[subgen] scanning media library...")
-    app.config["MEDIA_CACHE"] = scan_media(base_dir)
-    print(f"[subgen] scan complete: {len(app.config['MEDIA_CACHE'])} items")
+    _start_scan(app, force=True)
 
     @app.route("/")
     def index():
@@ -63,14 +74,21 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
 
     @app.route("/api/media")
     def api_media():
-        base_dir_value = app.config["BASE_DIR"]
         rescan = request.args.get("rescan") == "1"
         if rescan:
-            print("[subgen] rescan requested")
-            app.config["MEDIA_CACHE"] = scan_media(base_dir_value)
-            print(f"[subgen] scan complete: {len(app.config['MEDIA_CACHE'])} items")
+            _start_scan(app, force=True)
         items = app.config.get("MEDIA_CACHE", [])
-        return jsonify({"media_dir": base_dir_value, "items": items})
+        return jsonify(
+            {
+                "media_dir": app.config["BASE_DIR"],
+                "items": items,
+                "scan": dict(app.config["SCAN_STATE"]),
+            }
+        )
+
+    @app.route("/api/scan-status")
+    def api_scan_status():
+        return jsonify(dict(app.config["SCAN_STATE"]))
 
     @app.route("/api/media/describe", methods=["POST"])
     def api_media_describe():
@@ -278,6 +296,46 @@ def _google_api_key() -> str:
     if not key:
         raise ValueError("Google Translate API key is required for translation.")
     return key
+
+
+def _start_scan(app: Flask, force: bool = False) -> None:
+    with app.config["SCAN_LOCK"]:
+        state = app.config["SCAN_STATE"]
+        if state["running"] and not force:
+            return
+        if state["running"] and force:
+            return
+        state["running"] = True
+        state["total_files"] = 0
+        state["scanned_files"] = 0
+        state["scanned_videos"] = 0
+        state["current_file"] = ""
+        state["error"] = ""
+        thread = threading.Thread(target=_scan_worker, args=(app,), daemon=True)
+        thread.start()
+
+
+def _scan_worker(app: Flask) -> None:
+    print("[subgen] scanning media library...")
+
+    def on_progress(progress: Dict[str, object]) -> None:
+        state = app.config["SCAN_STATE"]
+        state["total_files"] = int(progress.get("total_files", 0))
+        state["scanned_files"] = int(progress.get("scanned_files", 0))
+        state["scanned_videos"] = int(progress.get("scanned_videos", 0))
+        state["current_file"] = str(progress.get("current_file", ""))
+
+    try:
+        items = scan_media(app.config["BASE_DIR"], progress_callback=on_progress)
+        app.config["MEDIA_CACHE"] = items
+        app.config["SCAN_STATE"]["last_completed_at"] = int(time.time())
+        print(f"[subgen] scan complete: {len(items)} items")
+    except Exception as exc:
+        app.config["SCAN_STATE"]["error"] = str(exc)
+        print(f"[subgen] scan failed: {exc}")
+    finally:
+        app.config["SCAN_STATE"]["running"] = False
+        app.config["SCAN_STATE"]["current_file"] = ""
 
 
 def _segment_from_result(segment: Dict[str, object], offset: float, overlap_seconds: float) -> Dict[str, object] | None:
