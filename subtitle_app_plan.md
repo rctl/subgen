@@ -71,6 +71,9 @@ Build a local program that takes a video file in common Jellyfin-compatible form
 - Stream extraction and transcription in chunks
 - Cache extracted audio if re-running
 - Allow setting CPU threads where applicable
+- Use backpressure and bounded queues to cap memory for multi-hour videos
+- Write intermediate segment results to disk to avoid holding all segments in RAM
+- Support resume by persisting chunk offsets and completed segments
 
 ## Testing Plan
 - Unit tests for subtitle formatting
