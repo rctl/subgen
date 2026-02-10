@@ -2,7 +2,6 @@ const mediaListEl = document.getElementById("mediaList");
 const searchInput = document.getElementById("searchInput");
 const statusEl = document.getElementById("status");
 const rescanBtn = document.getElementById("rescan");
-const mediaPathEl = document.getElementById("mediaPath");
 
 const modal = document.getElementById("modal");
 const modalTitle = document.getElementById("modalTitle");
@@ -33,7 +32,6 @@ async function fetchMedia() {
     setStatus(`Error: ${data.error}`);
     return;
   }
-  mediaPathEl.textContent = data.base_dir;
   mediaItems = data.items || [];
   setStatus(`${mediaItems.length} videos found.`);
   renderList();
