@@ -66,7 +66,7 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
             app.config["MEDIA_CACHE"] = scan_media(base_dir_value)
             print(f"[subgen] scan complete: {len(app.config['MEDIA_CACHE'])} items")
         items = app.config.get("MEDIA_CACHE", [])
-        return jsonify({"base_dir": base_dir_value, "items": items})
+        return jsonify({"media_dir": base_dir_value, "items": items})
 
     @app.route("/api/media/describe", methods=["POST"])
     def api_media_describe():
