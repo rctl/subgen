@@ -29,9 +29,13 @@ def translate_segments(
             texts, target_language, api_key, model=model, timeout=timeout
         )
         if len(translated_texts) != len(batch):
-            raise RuntimeError(
-                f"Translation count mismatch: expected {len(batch)}, got {len(translated_texts)}"
-            )
+            translated_texts = []
+            for line in texts:
+                translated_texts.append(
+                    _translate_single(
+                        line, target_language, api_key, model=model, timeout=timeout
+                    )
+                )
         for original, new_text in zip(batch, translated_texts):
             translated.append(
                 {
@@ -56,6 +60,7 @@ def _translate_batch(
             "Translate the following subtitle lines into "
             f"{target_language}. Preserve meaning, keep each line concise, and return "
             "only a JSON array of strings in the same order. "
+            "If an input line is empty, return an empty string at that position. "
             "Do not add commentary.\n\n"
             f"{json.dumps(texts, ensure_ascii=False)}"
         ),
@@ -98,3 +103,18 @@ def _translate_batch(
     if not isinstance(translated, list):
         raise RuntimeError("Translation response was not a JSON array.")
     return [str(entry).strip() for entry in translated]
+
+
+def _translate_single(
+    text: str,
+    target_language: str,
+    api_key: str,
+    model: str,
+    timeout: int,
+) -> str:
+    if not text:
+        return ""
+    translated = _translate_batch(
+        [text], target_language, api_key, model=model, timeout=timeout
+    )
+    return translated[0] if translated else ""
