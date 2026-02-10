@@ -7,7 +7,7 @@ Build a local program that takes a video file in common Jellyfin-compatible form
 - Input: Single video file path
 - Output: Subtitle file with timings and text
 - Local execution, no cloud dependency required
-- Primary language: English transcription
+- Primary languages: Swedish and Chinese, with configurable language selection
 
 ## Proposed Stack
 - Language: Go
@@ -18,7 +18,7 @@ Build a local program that takes a video file in common Jellyfin-compatible form
 ## Workflow
 1. Validate input video file
 2. Extract audio to 16 kHz mono PCM (int16 LE)
-3. POST raw PCM bytes to `/transcribe` with `X-Sample-Rate: 16000`
+3. POST raw PCM bytes to `/transcribe` with `X-Sample-Rate: 16000` and target language
 4. Build subtitle segments
 5. Write `.srt` and optionally `.vtt`
 6. Clean up temp artifacts
@@ -36,14 +36,22 @@ Build a local program that takes a video file in common Jellyfin-compatible form
   - `--model` remote model name or ID (if supported by server)
   - `--endpoint` remote API base URL (expects `/transcribe`)
   - `--api-key` API token
-  - `--lang` default `en`
+  - `--lang` default `sv` (allow `zh`, `zh-CN`, `zh-TW`)
   - `--format` `srt|vtt`
   - `--threads`
 
 ## Transcription Strategy
 - Use Whisper JSON response `segments` for timings
 - Chunk audio for long videos to reduce memory usage
-- Merge short segments for readability
+- Use fixed-length chunks with overlap to preserve context
+- Merge short segments for readability and de-duplicate overlaps
+
+## Timing Synchronization
+- Decode audio via FFmpeg using timestamps (do not time-stretch)
+- For each chunk, track its absolute start time in the source audio
+- Add chunk start offset to each `segments[].start`/`segments[].end`
+- Overlap chunks (e.g., 3–5 seconds) to preserve context, then drop duplicated text
+- Keep original timebase; never re-sample to change playback speed
 
 ## Jarvis STT Server Compatibility
 - Endpoint: `POST /transcribe`
