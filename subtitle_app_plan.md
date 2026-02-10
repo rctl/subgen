@@ -14,20 +14,23 @@ Build a local program that takes a video file in common Jellyfin-compatible form
 - Media handling: FFmpeg (CLI) for audio extraction
 - HTTP client: `httpx` or `requests`
 - Transcription: Remote speech-to-text service compatible with Jarvis `stt-server`
+- Translation: Separate HTTP microservice (containerized)
 - Subtitle output: SRT and VTT writers
 
 ## Workflow
 1. Validate input video file
 2. Extract audio to 16 kHz mono PCM (int16 LE)
 3. POST raw PCM bytes to `/transcribe` with `X-Sample-Rate: 16000` and target language
-4. Build subtitle segments
-5. Write `.srt`
-6. Clean up temp artifacts
+4. If target subtitle language differs, send segments to translation service over HTTP
+5. Build subtitle segments
+6. Write `.srt`
+7. Clean up temp artifacts
 
 ## Components
 - `subgen/__main__.py`: CLI entry point
 - `subgen/media.py`: FFmpeg wrapper (audio extraction)
 - `subgen/transcribe.py`: Jarvis `stt-server` API client and timestamp parsing
+- `subgen/translate.py`: Translator service HTTP client
 - `subgen/subtitles.py`: SRT/VTT generation
 - `subgen/config.py`: CLI flags and defaults
 
@@ -36,6 +39,8 @@ Build a local program that takes a video file in common Jellyfin-compatible form
 - Optional flags:
   - `--model` remote model name or ID (if supported by server)
   - `--endpoint` remote API base URL (expects `/transcribe`)
+  - `--translate-endpoint` translator API base URL (required for translation)
+  - `--target-lang` subtitle output language (e.g., `en`)
   - `--api-key` API token
   - `--lang` default `sv` (allow `zh`, `zh-CN`, `zh-TW`)
   - `--format` `srt`
@@ -60,6 +65,13 @@ Build a local program that takes a video file in common Jellyfin-compatible form
 - Header: `X-Sample-Rate` (e.g., `16000`)
 - Response: Whisper `transcribe` JSON with top-level `text`, `language`, and `segments`
 - Timing source: `segments[].start`, `segments[].end`, `segments[].text`
+
+## Translator Service Compatibility
+- Separate containerized service
+- HTTP API (no in-process fallback)
+- Required when `--target-lang` differs from `--lang`
+- Expected request: list of segment texts plus source/target language codes
+- Expected response: translated segment texts in original order
 
 ## Error Handling
 - Validate FFmpeg availability
