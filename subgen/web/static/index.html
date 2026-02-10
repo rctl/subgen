@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Subgen</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="brand">Subgen</div>
+    <div class="path">
+      <label for="mediaPath">Media folder</label>
+      <input id="mediaPath" type="text" placeholder="/path/to/media" />
+      <button id="rescan">Scan</button>
+    </div>
+    <div class="search">
+      <input id="searchInput" type="text" placeholder="Search titles..." />
+    </div>
+  </header>
+
+  <main>
+    <div id="status" class="status"></div>
+    <div id="mediaList" class="media-list"></div>
+  </main>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modalTitle">Generate Subtitle</h2>
+        <button id="closeModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <label>Source language</label>
+        <input id="sourceLang" type="text" placeholder="sv" />
+
+        <label>Target language</label>
+        <input id="targetLang" type="text" placeholder="en" />
+
+        <label>Mode</label>
+        <select id="mode">
+          <option value="use_existing">Use existing (default)</option>
+          <option value="translate_existing">Translate existing</option>
+          <option value="transcribe">Transcribe (force)</option>
+        </select>
+
+        <label>Existing subtitle</label>
+        <select id="existingSub"></select>
+
+        <div class="hint">Generated subtitles are saved next to the video as <code>gen_[lang].srt</code>.</div>
+      </div>
+      <div class="modal-footer">
+        <button id="runGenerate">Generate</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

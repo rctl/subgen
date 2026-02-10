@@ -26,3 +26,10 @@ Translation notes:
 - Translated output is written to `output.{lang}.srt` (e.g., `MovieName.sv.srt`).
 - If the original `output.srt` already exists, STT is skipped unless `--force-stt` is used.
 - For Jellyfin to detect subtitles, keep the subtitle file next to the video and include the movie filename (e.g., `MovieName.gen_en.srt`).
+
+## Web UI
+Run the web UI server:
+```bash
+python -m subgen.web --media-dir /path/to/media --endpoint https://stt.rtek.dev
+```
+Open `http://localhost:8080` to browse media, inspect subtitles, and generate `gen_[lang].srt` files.
