@@ -22,7 +22,7 @@ function setStatus(message) {
 
 async function fetchMedia(path = "") {
   setStatus("Scanning media...");
-  const url = new URL("/api/media", window.location.origin);
+  const url = new URL("api/media", window.location.origin + window.location.pathname);
   if (path) {
     url.searchParams.set("path", path);
   }
@@ -127,7 +127,7 @@ async function runGenerate() {
     existing_sub_id: existingSubSelect.value || null,
   };
 
-  const response = await fetch("/api/subtitles/generate", {
+  const response = await fetch("api/subtitles/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
