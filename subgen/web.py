@@ -39,6 +39,7 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     app = Flask(__name__, static_folder="web/static")
     app.config["BASE_DIR"] = base_dir
     app.config["STT_ENDPOINT"] = stt_endpoint
+    app.config["MEDIA_CACHE"] = scan_media(base_dir)
 
     @app.route("/")
     def index():
@@ -51,7 +52,10 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     @app.route("/api/media")
     def api_media():
         base_dir_value = app.config["BASE_DIR"]
-        items = scan_media(base_dir_value)
+        rescan = request.args.get("rescan") == "1"
+        if rescan:
+            app.config["MEDIA_CACHE"] = scan_media(base_dir_value)
+        items = app.config.get("MEDIA_CACHE", [])
         return jsonify({"base_dir": base_dir_value, "items": items})
 
     @app.route("/api/media/describe", methods=["POST"])

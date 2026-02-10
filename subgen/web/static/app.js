@@ -22,9 +22,12 @@ function setStatus(message) {
   statusEl.textContent = message;
 }
 
-async function fetchMedia() {
+async function fetchMedia(rescan = false) {
   setStatus("Scanning media...");
   const url = new URL("api/media", window.location.origin + window.location.pathname);
+  if (rescan) {
+    url.searchParams.set("rescan", "1");
+  }
   const response = await fetch(url);
   const data = await response.json();
   if (data.error) {
@@ -156,7 +159,7 @@ async function runGenerate() {
 }
 
 searchInput.addEventListener("input", renderList);
-rescanBtn.addEventListener("click", () => fetchMedia());
+rescanBtn.addEventListener("click", () => fetchMedia(true));
 closeModalBtn.addEventListener("click", () => modal.classList.add("hidden"));
 runGenerateBtn.addEventListener("click", runGenerate);
 modeSelect.addEventListener("change", toggleModeFields);
