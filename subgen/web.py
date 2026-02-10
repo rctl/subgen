@@ -32,10 +32,14 @@ def load_config() -> Dict[str, object]:
     for path in (CONFIG_PATH, FALLBACK_CONFIG_PATH):
         try:
             with open(path, "r", encoding="utf-8") as handle:
-                return json.load(handle)
+                payload = json.load(handle)
+            print(f"[subgen] loaded config from {path}")
+            return payload
         except FileNotFoundError:
+            print(f"[subgen] config not found at {path}")
             continue
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            print(f"[subgen] config parse error at {path}: {exc}")
             return {}
     return {}
 
@@ -318,6 +322,9 @@ def main() -> int:
     config = load_config()
     media_dir = args.media_dir or config.get("media_dir") or "/agent/workspace/media_test"
     endpoint = args.endpoint or config.get("stt_endpoint") or "https://stt.rtek.dev"
+    google_key = config.get("google_translate_api_key")
+    if google_key and not os.environ.get("GOOGLE_TRANSLATE_API_KEY"):
+        os.environ["GOOGLE_TRANSLATE_API_KEY"] = str(google_key)
     print(f"[subgen] using config_path={CONFIG_PATH}")
     print(f"[subgen] fallback config_path={FALLBACK_CONFIG_PATH}")
     print(f"[subgen] config values: media_dir={media_dir} stt_endpoint={endpoint}")
