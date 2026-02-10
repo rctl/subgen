@@ -12,6 +12,8 @@ const translateTargetLangInput = document.getElementById("translateTargetLang");
 const modeSelect = document.getElementById("mode");
 const existingSubSelect = document.getElementById("existingSub");
 const runGenerateBtn = document.getElementById("runGenerate");
+const generateSpinner = document.getElementById("generateSpinner");
+const generateLabel = document.getElementById("generateLabel");
 const transcribeFields = document.getElementById("transcribeFields");
 const translateFields = document.getElementById("translateFields");
 
@@ -155,7 +157,8 @@ function populateExistingSubs(item) {
 
 async function runGenerate() {
   if (!currentMedia) return;
-  setStatus("Generating subtitles...");
+  setGenerateState(true);
+  setStatus("Queued subtitle generation...");
   let payload = { media_path: currentMedia.path };
   if (modeSelect.value === "translate") {
     payload = {
@@ -184,11 +187,11 @@ async function runGenerate() {
   const data = await response.json();
   if (data.error) {
     setStatus(`Error: ${data.error}`);
-  } else {
-    setStatus(`Generated: ${data.outputs?.join(", ") || ""}`);
+    setGenerateState(false);
+    return;
   }
   modal.classList.add("hidden");
-  fetchMedia(false);
+  pollJob(data.job_id);
 }
 
 searchInput.addEventListener("input", renderList);
@@ -244,4 +247,45 @@ function populateLanguageOptions() {
   sourceLangInput.value = "sv";
   targetLangInput.value = "sv";
   translateTargetLangInput.value = "en";
+}
+
+function setGenerateState(active) {
+  runGenerateBtn.disabled = active;
+  generateSpinner.classList.toggle("hidden", !active);
+  generateLabel.textContent = active ? "Generating..." : "Generate";
+}
+
+async function pollJob(jobId) {
+  if (!jobId) {
+    setGenerateState(false);
+    return;
+  }
+  let done = false;
+  while (!done) {
+    const response = await fetch(`api/jobs/${jobId}`);
+    const data = await response.json();
+    if (data.error) {
+      setStatus(`Error: ${data.error}`);
+      setGenerateState(false);
+      return;
+    }
+    if (data.status === "completed") {
+      setStatus(`Generated: ${data.outputs?.join(", ") || ""}`);
+      done = true;
+      break;
+    }
+    if (data.status === "failed") {
+      setStatus(`Error: ${data.error || "Job failed"}`);
+      done = true;
+      break;
+    }
+    if (data.stage && data.message) {
+      setStatus(`${data.stage}: ${data.message}`);
+    } else if (data.stage) {
+      setStatus(`Working: ${data.stage}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  setGenerateState(false);
+  fetchMedia(false);
 }

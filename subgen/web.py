@@ -6,6 +6,7 @@ import os
 import tempfile
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -52,6 +53,8 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     app.config["STT_ENDPOINT"] = stt_endpoint
     app.config["MEDIA_CACHE"] = []
     app.config["SCAN_LOCK"] = threading.Lock()
+    app.config["JOB_LOCK"] = threading.Lock()
+    app.config["JOBS"] = {}
     app.config["SCAN_STATE"] = {
         "running": False,
         "total_files": 0,
@@ -102,75 +105,15 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     @app.route("/api/subtitles/generate", methods=["POST"])
     def api_generate():
         data = request.get_json(silent=True) or {}
-        media_path = data.get("media_path")
-        source_lang = (data.get("source_lang") or "").strip() or "und"
-        target_lang = (data.get("target_lang") or "").strip() or source_lang
-        mode = (data.get("mode") or "use_existing").strip()
-        existing_id = data.get("existing_sub_id")
+        job_id = _create_job(app, data)
+        return jsonify({"job_id": job_id})
 
-        if not media_path:
-            return jsonify({"error": "Missing media_path"}), 400
-
-        media = describe_media(Path(media_path))
-        output_dir = Path(media_path).parent
-        stem = Path(media_path).stem
-
-        def output_path_for(lang: str) -> Path:
-            return output_dir / f"{stem}.gen_{lang}.srt"
-
-        existing = _resolve_existing_sub(media, existing_id)
-
-        if mode == "use_existing":
-            if existing:
-                return jsonify(
-                    _generate_from_existing(
-                        existing,
-                        source_lang,
-                        target_lang,
-                        Path(media_path),
-                        output_path_for,
-                    )
-                )
-            mode = "transcribe"
-
-        if mode == "translate_existing":
-            if not existing:
-                return jsonify({"error": "No existing subtitle available."}), 400
-            return jsonify(
-                _generate_from_existing(
-                    existing,
-                    source_lang,
-                    target_lang,
-                    Path(media_path),
-                    output_path_for,
-                    require_translate=True,
-                )
-            )
-
-        if mode != "transcribe":
-            return jsonify({"error": f"Unknown mode: {mode}"}), 400
-
-        segments = transcribe_media(
-            Path(media_path),
-            app.config["STT_ENDPOINT"],
-            source_lang,
-        )
-        source_output = output_path_for(source_lang)
-        source_output.write_text(format_srt(segments), encoding="utf-8")
-
-        outputs = [str(source_output)]
-        if target_lang != source_lang:
-            translated = translate_segments(
-                segments,
-                target_lang,
-                api_key=_google_api_key(),
-                source_language=source_lang if source_lang != "und" else None,
-            )
-            target_output = output_path_for(target_lang)
-            target_output.write_text(format_srt(translated), encoding="utf-8")
-            outputs.append(str(target_output))
-
-        return jsonify({"outputs": outputs})
+    @app.route("/api/jobs/<job_id>")
+    def api_job_status(job_id: str):
+        job = app.config["JOBS"].get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        return jsonify(job)
 
     return app
 
@@ -296,6 +239,110 @@ def _google_api_key() -> str:
     if not key:
         raise ValueError("Google Translate API key is required for translation.")
     return key
+
+
+def _create_job(app: Flask, payload: Dict[str, object]) -> str:
+    job_id = str(uuid.uuid4())
+    job = {
+        "id": job_id,
+        "status": "queued",
+        "stage": "queued",
+        "message": "",
+        "outputs": [],
+        "error": "",
+        "created_at": int(time.time()),
+        "updated_at": int(time.time()),
+    }
+    with app.config["JOB_LOCK"]:
+        app.config["JOBS"][job_id] = job
+    thread = threading.Thread(target=_run_job, args=(app, job_id, payload), daemon=True)
+    thread.start()
+    return job_id
+
+
+def _update_job(app: Flask, job_id: str, **kwargs: object) -> None:
+    with app.config["JOB_LOCK"]:
+        job = app.config["JOBS"].get(job_id)
+        if not job:
+            return
+        job.update(kwargs)
+        job["updated_at"] = int(time.time())
+
+
+def _run_job(app: Flask, job_id: str, payload: Dict[str, object]) -> None:
+    try:
+        _update_job(app, job_id, status="running", stage="init", message="Preparing job")
+        result = _generate_outputs(app, payload, job_id)
+        _update_job(
+            app,
+            job_id,
+            status="completed",
+            stage="done",
+            message="Completed",
+            outputs=result.get("outputs", []),
+        )
+    except Exception as exc:
+        _update_job(app, job_id, status="failed", stage="error", error=str(exc))
+
+
+def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Dict[str, object]:
+    media_path = payload.get("media_path")
+    source_lang = (payload.get("source_lang") or "").strip() or "und"
+    target_lang = (payload.get("target_lang") or "").strip() or source_lang
+    mode = (payload.get("mode") or "use_existing").strip()
+    existing_id = payload.get("existing_sub_id")
+
+    if not media_path:
+        raise ValueError("Missing media_path")
+
+    media = describe_media(Path(media_path))
+    output_dir = Path(media_path).parent
+    stem = Path(media_path).stem
+
+    def output_path_for(lang: str) -> Path:
+        return output_dir / f"{stem}.gen_{lang}.srt"
+
+    existing = _resolve_existing_sub(media, existing_id)
+
+    if mode == "translate_existing":
+        if not existing:
+            raise ValueError("No existing subtitle available.")
+        _update_job(app, job_id, stage="translate", message="Translating existing subtitles")
+        return _generate_from_existing(
+            existing,
+            source_lang,
+            target_lang,
+            Path(media_path),
+            output_path_for,
+            require_translate=True,
+        )
+
+    if mode != "transcribe":
+        raise ValueError(f"Unknown mode: {mode}")
+
+    _update_job(app, job_id, stage="transcribe", message="Transcribing audio")
+    segments = transcribe_media(
+        Path(media_path),
+        app.config["STT_ENDPOINT"],
+        source_lang,
+    )
+    source_output = output_path_for(source_lang)
+    source_output.write_text(format_srt(segments), encoding="utf-8")
+
+    outputs = [str(source_output)]
+    if target_lang != source_lang:
+        _update_job(app, job_id, stage="translate", message="Translating subtitles")
+        translated = translate_segments(
+            segments,
+            target_lang,
+            api_key=_google_api_key(),
+            source_language=source_lang if source_lang != "und" else None,
+        )
+        target_output = output_path_for(target_lang)
+        target_output.write_text(format_srt(translated), encoding="utf-8")
+        outputs.append(str(target_output))
+
+    return {"outputs": outputs}
 
 
 def _start_scan(app: Flask, force: bool = False) -> None:

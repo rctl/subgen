@@ -64,7 +64,10 @@
         <div class="hint">Generated subtitles are saved next to the video as <code>gen_[lang].srt</code>.</div>
       </div>
       <div class="modal-footer">
-        <button id="runGenerate">Generate</button>
+        <button id="runGenerate">
+          <span class="spinner hidden" id="generateSpinner"></span>
+          <span id="generateLabel">Generate</span>
+        </button>
       </div>
     </div>
   </div>
