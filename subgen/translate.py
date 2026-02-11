@@ -164,10 +164,18 @@ def translate_segments_anthropic(
             source_language=source_language,
             timeout=timeout,
         )
-        if len(translated_texts) != len(batch):
-            raise RuntimeError(
-                f"Anthropic translation count mismatch: expected {len(batch)}, got {len(translated_texts)}."
+        expected_count = len(batch)
+        actual_count = len(translated_texts)
+        if actual_count != expected_count:
+            print(
+                f"[subgen][translate] anthropic count mismatch: expected={expected_count} got={actual_count}; applying trim/pad",
+                flush=True,
             )
+            if actual_count > expected_count:
+                translated_texts = translated_texts[:expected_count]
+            else:
+                missing = expected_count - actual_count
+                translated_texts = translated_texts + texts[-missing:]
         for original, new_text in zip(batch, translated_texts):
             translated.append(
                 {
