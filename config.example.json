@@ -1,11 +1,11 @@
 {
   "google_translate_api_key": "REPLACE_ME",
   "anthropic_api_key": "REPLACE_ME",
-  "anthropic_model": "claude-3-5-sonnet-latest",
+  "anthropic_model": "claude-sonnet-4-5",
   "anthropic_max_parallel": 5,
   "translate_provider_default": "google",
   "media_dir": "/path/to/media",
-  "stt_endpoint": "https://stt.rtek.dev",
+  "stt_endpoint": "https://stt.example.com",
   "vad_threshold": 0.3,
   "index_path": "subgen/subgen.json"
 }
