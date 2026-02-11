@@ -57,11 +57,12 @@ def scan_media_with_index(
     should_cancel: Optional[Callable[[], bool]] = None,
     seed_items: Optional[List[Dict[str, object]]] = None,
     persist_on_full: bool = True,
+    index_path: Optional[str] = None,
 ) -> List[Dict[str, object]]:
     base_path = Path(base_dir).resolve()
-    index_path = base_path / INDEX_FILENAME
+    resolved_index_path = _resolve_index_path(base_path, index_path)
 
-    indexed_items = _load_index_items(index_path)
+    indexed_items = _load_index_items(resolved_index_path)
     for item in seed_items or []:
         if isinstance(item, dict):
             indexed_items.append(item)
@@ -78,7 +79,7 @@ def scan_media_with_index(
             should_cancel=should_cancel,
         )
         if persist_on_full:
-            _save_index_items(index_path, items)
+            _save_index_items(resolved_index_path, items)
         return items
 
     items = list(indexed_map.values())
@@ -131,20 +132,25 @@ def scan_media_with_index(
                 )
 
     items_sorted = sorted(items, key=lambda item: str(item.get("title", "")).lower())
-    _save_index_items(index_path, items_sorted)
+    _save_index_items(resolved_index_path, items_sorted)
     return items_sorted
 
 
-def save_media_index(base_dir: str, items: List[Dict[str, object]], async_write: bool = False) -> None:
+def save_media_index(
+    base_dir: str,
+    items: List[Dict[str, object]],
+    async_write: bool = False,
+    index_path: Optional[str] = None,
+) -> None:
     base_path = Path(base_dir).resolve()
-    index_path = base_path / INDEX_FILENAME
-    _save_index_items(index_path, items, async_write=async_write)
+    resolved_index_path = _resolve_index_path(base_path, index_path)
+    _save_index_items(resolved_index_path, items, async_write=async_write)
 
 
-def load_media_index(base_dir: str) -> List[Dict[str, object]]:
+def load_media_index(base_dir: str, index_path: Optional[str] = None) -> List[Dict[str, object]]:
     base_path = Path(base_dir).resolve()
-    index_path = base_path / INDEX_FILENAME
-    items = _load_index_items(index_path)
+    resolved_index_path = _resolve_index_path(base_path, index_path)
+    items = _load_index_items(resolved_index_path)
     return sorted(items, key=lambda item: str(item.get("title", "")).lower())
 
 
@@ -347,4 +353,14 @@ def _save_index_items(index_path: Path, items: List[Dict[str, object]], async_wr
         "updated_at": int(time.time()),
         "items": items,
     }
+    index_path.parent.mkdir(parents=True, exist_ok=True)
     index_path.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+
+
+def _resolve_index_path(base_path: Path, index_path: Optional[str]) -> Path:
+    if index_path and str(index_path).strip():
+        path = Path(str(index_path).strip())
+        if path.is_absolute():
+            return path
+        return (base_path / path).resolve()
+    return base_path / INDEX_FILENAME

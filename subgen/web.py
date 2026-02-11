@@ -43,11 +43,12 @@ def load_config() -> Dict[str, object]:
     return {}
 
 
-def create_app(base_dir: str, stt_endpoint: str) -> Flask:
+def create_app(base_dir: str, stt_endpoint: str, index_path: Optional[str] = None) -> Flask:
     app = Flask(__name__, static_folder="web/static")
     app.config["BASE_DIR"] = base_dir
     app.config["STT_ENDPOINT"] = stt_endpoint
-    app.config["MEDIA_CACHE"] = load_media_index(base_dir)
+    app.config["INDEX_PATH"] = index_path
+    app.config["MEDIA_CACHE"] = load_media_index(base_dir, index_path=index_path)
     app.config["JOB_LOCK"] = threading.Lock()
     app.config["JOBS"] = {}
     if app.config["MEDIA_CACHE"]:
@@ -416,10 +417,16 @@ def _scan_worker(app: Flask, job_id: str, full_scan: bool) -> None:
             should_cancel=lambda: _is_cancel_requested(app, job_id),
             seed_items=app.config.get("MEDIA_CACHE", []),
             persist_on_full=False,
+            index_path=app.config.get("INDEX_PATH"),
         )
         app.config["MEDIA_CACHE"] = items
         if full_scan:
-            save_media_index(app.config["BASE_DIR"], items, async_write=True)
+            save_media_index(
+                app.config["BASE_DIR"],
+                items,
+                async_write=True,
+                index_path=app.config.get("INDEX_PATH"),
+            )
         print(f"[subgen] scan complete ({mode}): {len(items)} items")
         _update_job(
             app,
@@ -450,13 +457,14 @@ def main() -> int:
     config = load_config()
     media_dir = args.media_dir or config.get("media_dir") or "/agent/workspace/media_test"
     endpoint = args.endpoint or config.get("stt_endpoint") or "https://stt.rtek.dev"
+    index_path = config.get("index_path")
     google_key = config.get("google_translate_api_key")
     if google_key and not os.environ.get("GOOGLE_TRANSLATE_API_KEY"):
         os.environ["GOOGLE_TRANSLATE_API_KEY"] = str(google_key)
     print(f"[subgen] using config_path={CONFIG_PATH}")
     print(f"[subgen] fallback config_path={FALLBACK_CONFIG_PATH}")
-    print(f"[subgen] config values: media_dir={media_dir} stt_endpoint={endpoint}")
-    app = create_app(str(media_dir), str(endpoint))
+    print(f"[subgen] config values: media_dir={media_dir} stt_endpoint={endpoint} index_path={index_path or 'media_dir/subgen.json'}")
+    app = create_app(str(media_dir), str(endpoint), str(index_path) if index_path else None)
     app.run(host=args.host, port=args.port)
     return 0
 

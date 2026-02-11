@@ -35,3 +35,5 @@ python -m subgen.web --media-dir /path/to/media --endpoint https://stt.rtek.dev
 Open `http://localhost:8080` to browse media, inspect subtitles, and generate `gen_[lang].srt` files.
 
 The web UI reads `media_dir` and `stt_endpoint` from `config.json` if CLI flags are not provided.
+It also supports optional `index_path` in `config.json` to override where the media index is stored.
+Relative `index_path` values are resolved under `media_dir`; absolute paths can place the index outside `media_dir`.
