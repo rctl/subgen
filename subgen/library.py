@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import subprocess
+import threading
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -54,11 +55,16 @@ def scan_media_with_index(
     full_scan: bool,
     progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
+    seed_items: Optional[List[Dict[str, object]]] = None,
+    persist_on_full: bool = True,
 ) -> List[Dict[str, object]]:
     base_path = Path(base_dir).resolve()
     index_path = base_path / INDEX_FILENAME
 
     indexed_items = _load_index_items(index_path)
+    for item in seed_items or []:
+        if isinstance(item, dict):
+            indexed_items.append(item)
     indexed_map: Dict[str, Dict[str, object]] = {}
     for item in indexed_items:
         path = str(item.get("path", ""))
@@ -71,7 +77,8 @@ def scan_media_with_index(
             progress_callback=progress_callback,
             should_cancel=should_cancel,
         )
-        _save_index_items(index_path, items)
+        if persist_on_full:
+            _save_index_items(index_path, items)
         return items
 
     items = list(indexed_map.values())
@@ -126,6 +133,12 @@ def scan_media_with_index(
     items_sorted = sorted(items, key=lambda item: str(item.get("title", "")).lower())
     _save_index_items(index_path, items_sorted)
     return items_sorted
+
+
+def save_media_index(base_dir: str, items: List[Dict[str, object]], async_write: bool = False) -> None:
+    base_path = Path(base_dir).resolve()
+    index_path = base_path / INDEX_FILENAME
+    _save_index_items(index_path, items, async_write=async_write)
 
 
 def describe_media(path: Path) -> Dict[str, object]:
@@ -317,7 +330,11 @@ def _load_index_items(index_path: Path) -> List[Dict[str, object]]:
     return output
 
 
-def _save_index_items(index_path: Path, items: List[Dict[str, object]]) -> None:
+def _save_index_items(index_path: Path, items: List[Dict[str, object]], async_write: bool = False) -> None:
+    if async_write:
+        thread = threading.Thread(target=_save_index_items, args=(index_path, items, False), daemon=True)
+        thread.start()
+        return
     payload = {
         "version": 1,
         "updated_at": int(time.time()),

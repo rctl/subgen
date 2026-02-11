@@ -15,6 +15,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from .library import (
     describe_media,
     extract_embedded_sub,
+    save_media_index,
     scan_media_with_index,
 )
 from .subtitles import format_srt, parse_srt
@@ -408,8 +409,12 @@ def _scan_worker(app: Flask, job_id: str, full_scan: bool) -> None:
             full_scan=full_scan,
             progress_callback=on_progress,
             should_cancel=lambda: _is_cancel_requested(app, job_id),
+            seed_items=app.config.get("MEDIA_CACHE", []),
+            persist_on_full=False,
         )
         app.config["MEDIA_CACHE"] = items
+        if full_scan:
+            save_media_index(app.config["BASE_DIR"], items, async_write=True)
         print(f"[subgen] scan complete ({mode}): {len(items)} items")
         _update_job(
             app,
