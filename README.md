@@ -43,4 +43,5 @@ Relative `index_path` values are resolved under `media_dir`; absolute paths can 
 Translation provider selection is available in the UI with `Google Translate` and `Anthropic`.
 `Google Translate` remains unchanged and uses `google_translate_api_key`.
 For Anthropic, set `anthropic_api_key` and `anthropic_model` in `config.json`.
+`anthropic_max_parallel` controls concurrent Anthropic batch requests and defaults to `5`.
 Anthropic model is passed through directly to the SDK exactly as configured.

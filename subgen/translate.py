@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, Iterable, List, Optional
 
 import requests
@@ -132,6 +133,7 @@ def translate_segments_anthropic(
     model: str,
     source_language: Optional[str] = None,
     batch_size: int = 200,
+    max_parallel: int = 5,
     timeout: int = 180,
     progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
@@ -142,41 +144,68 @@ def translate_segments_anthropic(
         raise ValueError("Anthropic model is required for Anthropic translation.")
 
     segment_list = list(segments)
-    translated: List[Dict[str, object]] = []
-    for start in range(0, len(segment_list), batch_size):
-        if should_cancel and should_cancel():
-            raise RuntimeError("Job canceled.")
+    batches: List[Dict[str, object]] = []
+    for batch_index, start in enumerate(range(0, len(segment_list), batch_size)):
         batch = segment_list[start : start + batch_size]
-        if progress_callback:
-            progress_callback(
-                {
-                    "stage": "translate",
-                    "processed_segments": min(start, len(segment_list)),
-                    "total_segments": len(segment_list),
-                }
-            )
         texts = [str(item.get("text", "")).strip() for item in batch]
-        translated_texts = _anthropic_translate_batch(
-            texts=texts,
-            target_language=target_language,
-            api_key=api_key,
-            model=model,
-            source_language=source_language,
-            timeout=timeout,
-        )
-        expected_count = len(batch)
-        actual_count = len(translated_texts)
-        if actual_count != expected_count:
-            print(
-                f"[subgen][translate] anthropic count mismatch: expected={expected_count} got={actual_count}; applying trim/pad",
-                flush=True,
+        batches.append({"index": batch_index, "items": batch, "texts": texts})
+
+    translated_by_index: Dict[int, List[str]] = {}
+    processed_segments = 0
+    workers = max(1, int(max_parallel))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_map = {}
+        for batch in batches:
+            if should_cancel and should_cancel():
+                raise RuntimeError("Job canceled.")
+            future = executor.submit(
+                _anthropic_translate_batch,
+                texts=batch["texts"],
+                target_language=target_language,
+                api_key=api_key,
+                model=model,
+                source_language=source_language,
+                timeout=timeout,
             )
-            if actual_count > expected_count:
-                translated_texts = translated_texts[:expected_count]
-            else:
-                missing = expected_count - actual_count
-                translated_texts = translated_texts + texts[-missing:]
-        for original, new_text in zip(batch, translated_texts):
+            future_map[future] = batch
+
+        for future in as_completed(future_map):
+            if should_cancel and should_cancel():
+                for pending in future_map:
+                    pending.cancel()
+                raise RuntimeError("Job canceled.")
+
+            batch = future_map[future]
+            translated_texts = future.result()
+            expected_count = len(batch["items"])
+            actual_count = len(translated_texts)
+            if actual_count != expected_count:
+                print(
+                    f"[subgen][translate] anthropic count mismatch: expected={expected_count} got={actual_count}; applying trim/pad",
+                    flush=True,
+                )
+                if actual_count > expected_count:
+                    translated_texts = translated_texts[:expected_count]
+                else:
+                    missing = expected_count - actual_count
+                    translated_texts = translated_texts + batch["texts"][-missing:]
+            translated_by_index[int(batch["index"])] = translated_texts
+            processed_segments += expected_count
+            if progress_callback:
+                progress_callback(
+                    {
+                        "stage": "translate",
+                        "processed_segments": min(processed_segments, len(segment_list)),
+                        "total_segments": len(segment_list),
+                    }
+                )
+
+    translated: List[Dict[str, object]] = []
+    for batch in sorted(batches, key=lambda item: int(item["index"])):
+        translated_texts = translated_by_index.get(int(batch["index"]), [])
+        if len(translated_texts) != len(batch["items"]):
+            translated_texts = batch["texts"]
+        for original, new_text in zip(batch["items"], translated_texts):
             translated.append(
                 {
                     "start": float(original.get("start", 0.0)),

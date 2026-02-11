@@ -130,6 +130,7 @@ def _generate_from_existing(
     require_translate: bool = False,
     translate_provider: str = "google",
     anthropic_model: Optional[str] = None,
+    anthropic_max_parallel: int = 5,
     progress_callback=None,
     should_cancel=None,
 ) -> Dict[str, object]:
@@ -163,6 +164,7 @@ def _generate_from_existing(
             target_lang=target_lang,
             source_lang=source_lang,
             anthropic_model=anthropic_model,
+            anthropic_max_parallel=anthropic_max_parallel,
             progress_callback=progress_callback,
             should_cancel=should_cancel,
         )
@@ -206,6 +208,7 @@ def _translate_with_provider(
     target_lang: str,
     source_lang: str,
     anthropic_model: Optional[str],
+    anthropic_max_parallel: int,
     progress_callback=None,
     should_cancel=None,
 ) -> List[Dict[str, object]]:
@@ -218,6 +221,7 @@ def _translate_with_provider(
             target_lang,
             api_key=_anthropic_api_key(),
             model=model,
+            max_parallel=max(1, int(anthropic_max_parallel)),
             source_language=src,
             progress_callback=progress_callback,
             should_cancel=should_cancel,
@@ -323,6 +327,7 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
     existing_id = payload.get("existing_sub_id")
     translate_provider = (payload.get("translate_provider") or app.config.get("TRANSLATE_PROVIDER_DEFAULT") or "google").strip()
     anthropic_model = app.config.get("ANTHROPIC_MODEL")
+    anthropic_max_parallel = int(app.config.get("ANTHROPIC_MAX_PARALLEL", 5))
 
     if not media_path:
         raise ValueError("Missing media_path")
@@ -350,6 +355,7 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
             require_translate=True,
             translate_provider=translate_provider,
             anthropic_model=anthropic_model,
+            anthropic_max_parallel=anthropic_max_parallel,
             progress_callback=lambda progress: _update_job(
                 app,
                 job_id,
@@ -404,6 +410,7 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
             target_lang=target_lang,
             source_lang=source_lang,
             anthropic_model=anthropic_model,
+            anthropic_max_parallel=anthropic_max_parallel,
             progress_callback=lambda progress: _update_job(
                 app,
                 job_id,
@@ -517,6 +524,7 @@ def main() -> int:
     vad_threshold = float(config.get("vad_threshold") or 0.30)
     translate_provider_default = str(config.get("translate_provider_default") or "google")
     anthropic_model = str(config.get("anthropic_model") or "claude-3-5-sonnet-latest")
+    anthropic_max_parallel = int(config.get("anthropic_max_parallel") or 5)
     google_key = config.get("google_translate_api_key")
     anthropic_key = config.get("anthropic_api_key")
     if google_key and not os.environ.get("GOOGLE_TRANSLATE_API_KEY"):
@@ -529,7 +537,8 @@ def main() -> int:
         "[subgen] config values: "
         f"media_dir={media_dir} stt_endpoint={endpoint} index_path={index_path or 'media_dir/subgen.json'} "
         f"vad_threshold={vad_threshold:.2f} "
-        f"translate_provider_default={translate_provider_default} anthropic_model={anthropic_model}"
+        f"translate_provider_default={translate_provider_default} anthropic_model={anthropic_model} "
+        f"anthropic_max_parallel={anthropic_max_parallel}"
     )
     app = create_app(
         str(media_dir),
@@ -539,6 +548,7 @@ def main() -> int:
     )
     app.config["TRANSLATE_PROVIDER_DEFAULT"] = translate_provider_default
     app.config["ANTHROPIC_MODEL"] = anthropic_model
+    app.config["ANTHROPIC_MAX_PARALLEL"] = anthropic_max_parallel
     app.run(host=args.host, port=args.port)
     return 0
 
