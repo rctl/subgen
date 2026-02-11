@@ -9,11 +9,6 @@ import requests
 
 GOOGLE_TRANSLATE_ENDPOINT = "https://translation.googleapis.com/language/translate/v2"
 ANTHROPIC_MESSAGES_ENDPOINT = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_MODEL_ALIASES = {
-    "haiku": "claude-3-5-haiku-latest",
-    "sonnet": "claude-3-5-sonnet-latest",
-    "opus": "claude-3-opus-latest",
-}
 
 
 def translate_segments(
@@ -219,9 +214,8 @@ def _anthropic_translate_batch(
         + json.dumps(texts, ensure_ascii=False)
     )
     client = Anthropic(api_key=api_key, timeout=timeout)
-    resolved_model = _resolve_anthropic_model(model)
     response = client.messages.create(
-        model=resolved_model,
+        model=model,
         max_tokens=max(1024, len(texts) * 48),
         temperature=0,
         system=system,
@@ -244,16 +238,6 @@ def _anthropic_translate_batch(
     if not isinstance(translations, list):
         raise RuntimeError("Anthropic response missing translations array.")
     return [str(item).strip() for item in translations]
-
-
-def _resolve_anthropic_model(model: str) -> str:
-    model_norm = (model or "").strip()
-    if not model_norm:
-        raise ValueError("Anthropic model is required.")
-    alias = ANTHROPIC_MODEL_ALIASES.get(model_norm.lower())
-    if alias:
-        return alias
-    return model_norm
 
 
 def _extract_json_object(text: str) -> Dict[str, object]:
