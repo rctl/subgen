@@ -55,6 +55,7 @@ def transcribe_media(
     overlap_seconds: int = 3,
     sample_rate: int = 16000,
     timeout: int = 120,
+    vad_threshold: float = 0.30,
     progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
 ) -> List[Dict[str, object]]:
@@ -62,7 +63,6 @@ def transcribe_media(
     from .subtitles import normalize_text
 
     bytes_per_sample = 2
-    vad_threshold = 0.30
     vad_frame_ms = 30
     vad_padding_ms = 350
     vad_min_speech_ms = 600

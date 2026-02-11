@@ -43,10 +43,16 @@ def load_config() -> Dict[str, object]:
     return {}
 
 
-def create_app(base_dir: str, stt_endpoint: str, index_path: Optional[str] = None) -> Flask:
+def create_app(
+    base_dir: str,
+    stt_endpoint: str,
+    index_path: Optional[str] = None,
+    vad_threshold: float = 0.30,
+) -> Flask:
     app = Flask(__name__, static_folder="web/static")
     app.config["BASE_DIR"] = base_dir
     app.config["STT_ENDPOINT"] = stt_endpoint
+    app.config["VAD_THRESHOLD"] = vad_threshold
     app.config["INDEX_PATH"] = index_path
     app.config["MEDIA_CACHE"] = load_media_index(base_dir, index_path=index_path)
     app.config["JOB_LOCK"] = threading.Lock()
@@ -55,7 +61,9 @@ def create_app(base_dir: str, stt_endpoint: str, index_path: Optional[str] = Non
         print(f"[subgen] loaded {len(app.config['MEDIA_CACHE'])} media items from subgen.json")
     else:
         print("[subgen] no cached media index loaded")
-    print(f"[subgen] config base_dir={base_dir} stt_endpoint={stt_endpoint}")
+    print(
+        f"[subgen] config base_dir={base_dir} stt_endpoint={stt_endpoint} vad_threshold={vad_threshold:.2f}"
+    )
     _start_scan(app, full_scan=True)
 
     @app.route("/")
@@ -365,6 +373,7 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
         Path(media_path),
         app.config["STT_ENDPOINT"],
         source_lang,
+        vad_threshold=float(app.config.get("VAD_THRESHOLD", 0.30)),
         progress_callback=lambda progress: _update_job(
             app,
             job_id,
@@ -505,6 +514,7 @@ def main() -> int:
     media_dir = args.media_dir or config.get("media_dir") or "/agent/workspace/media_test"
     endpoint = args.endpoint or config.get("stt_endpoint") or "https://stt.rtek.dev"
     index_path = config.get("index_path")
+    vad_threshold = float(config.get("vad_threshold") or 0.30)
     translate_provider_default = str(config.get("translate_provider_default") or "google")
     anthropic_model = str(config.get("anthropic_model") or "claude-3-5-sonnet-latest")
     google_key = config.get("google_translate_api_key")
@@ -518,9 +528,15 @@ def main() -> int:
     print(
         "[subgen] config values: "
         f"media_dir={media_dir} stt_endpoint={endpoint} index_path={index_path or 'media_dir/subgen.json'} "
+        f"vad_threshold={vad_threshold:.2f} "
         f"translate_provider_default={translate_provider_default} anthropic_model={anthropic_model}"
     )
-    app = create_app(str(media_dir), str(endpoint), str(index_path) if index_path else None)
+    app = create_app(
+        str(media_dir),
+        str(endpoint),
+        str(index_path) if index_path else None,
+        vad_threshold=vad_threshold,
+    )
     app.config["TRANSLATE_PROVIDER_DEFAULT"] = translate_provider_default
     app.config["ANTHROPIC_MODEL"] = anthropic_model
     app.run(host=args.host, port=args.port)

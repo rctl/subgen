@@ -9,6 +9,11 @@ import requests
 
 GOOGLE_TRANSLATE_ENDPOINT = "https://translation.googleapis.com/language/translate/v2"
 ANTHROPIC_MESSAGES_ENDPOINT = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_MODEL_ALIASES = {
+    "haiku": "claude-3-5-haiku-latest",
+    "sonnet": "claude-3-5-sonnet-latest",
+    "opus": "claude-3-opus-latest",
+}
 
 
 def translate_segments(
@@ -195,6 +200,11 @@ def _anthropic_translate_batch(
     source_language: Optional[str],
     timeout: int,
 ) -> List[str]:
+    try:
+        from anthropic import Anthropic
+    except Exception as exc:
+        raise RuntimeError(f"Anthropic SDK is required for Anthropic translation: {exc}") from exc
+
     system = (
         "You are a subtitle translation engine. Translate each input subtitle line to the target language. "
         "Keep line order and count identical. Do not merge or split entries. Return only valid JSON."
@@ -208,34 +218,24 @@ def _anthropic_translate_batch(
         "Input lines JSON:\n"
         + json.dumps(texts, ensure_ascii=False)
     )
-    payload = {
-        "model": model,
-        "max_tokens": max(1024, len(texts) * 48),
-        "temperature": 0,
-        "system": system,
-        "messages": [{"role": "user", "content": user_prompt}],
-    }
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    response = requests.post(
-        ANTHROPIC_MESSAGES_ENDPOINT,
-        headers=headers,
-        json=payload,
-        timeout=timeout,
+    client = Anthropic(api_key=api_key, timeout=timeout)
+    resolved_model = _resolve_anthropic_model(model)
+    response = client.messages.create(
+        model=resolved_model,
+        max_tokens=max(1024, len(texts) * 48),
+        temperature=0,
+        system=system,
+        messages=[{"role": "user", "content": user_prompt}],
     )
-    if response.status_code >= 400:
-        raise RuntimeError(f"Anthropic Translate error {response.status_code}: {response.text}")
-    data = response.json()
-    content = data.get("content", [])
+    content = getattr(response, "content", None)
     if not isinstance(content, list):
         raise RuntimeError("Anthropic response missing content blocks.")
     text_blocks: List[str] = []
     for block in content:
-        if isinstance(block, dict) and block.get("type") == "text":
-            text_blocks.append(str(block.get("text", "")))
+        block_type = getattr(block, "type", "")
+        block_text = getattr(block, "text", "")
+        if block_type == "text":
+            text_blocks.append(str(block_text))
     joined = "\n".join(text_blocks).strip()
     if not joined:
         raise RuntimeError("Anthropic response did not include translation text.")
@@ -244,6 +244,16 @@ def _anthropic_translate_batch(
     if not isinstance(translations, list):
         raise RuntimeError("Anthropic response missing translations array.")
     return [str(item).strip() for item in translations]
+
+
+def _resolve_anthropic_model(model: str) -> str:
+    model_norm = (model or "").strip()
+    if not model_norm:
+        raise ValueError("Anthropic model is required.")
+    alias = ANTHROPIC_MODEL_ALIASES.get(model_norm.lower())
+    if alias:
+        return alias
+    return model_norm
 
 
 def _extract_json_object(text: str) -> Dict[str, object]:
