@@ -10,6 +10,12 @@ For translation to work you will need to provide a Google Cloud API key or Anthr
 Note, this project requires running stand alone STT server (micro service) available here: https://github.com/rctl/stt-server
 The STT server itself can be used for many differnt use-cases, and allows for more easy sharing of GPU memory between various applications that require STT integration.
 
+## Web UI
+
+Subgen comes with a fully functioning WebUI for easy subtitle generation for new media! 
+
+![Subgen WebUI](subgen.png)
+
 
 ## Requirements
 - Python 3.10+
@@ -22,6 +28,19 @@ pip install -r requirements.txt
 ```
 
 ## Usage
+
+The main recommended way to run this app is via docker. There's a pre-built image in `rctl/subgen:latest`.
+
+`config.json` is the main way you control the application, please set media directory and mount your media files from your library into the container. Subgen will automatically scan the directory for media. It will also generate an index to make scanning faster (incrementally scanning new media) after future restarts. 
+
+```bash
+docker run rctl/subgen:latest -v $(pwd)/config.json:/app/config.json -v /my/media:/media -p 8080:8080
+```
+
+Default port is 8080.
+
+## CLI Usage
+
 ```bash
 python -m subgen \
   --input /agent/workspace/jellyfin_sample.mkv \
