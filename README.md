@@ -4,6 +4,7 @@ Subgen helps you automatically generate subtitle files for any media using OpenA
 
 > Note! I didn't have much time to work on this, so this code is 100% vibe-coded! It works, surprisingly well, but might have some unknown bugs. I tested most flows and it has been working fine for me, but be aware of the risks.
 
+**If subtitle files already exist, subgen can do translation only, making it easy to add additional languages on existing subtitle (both embedded and sidecar supported).
 
 For translation to work you will need to provide a Google Cloud API key or Anthropic API key. See config example.
 
