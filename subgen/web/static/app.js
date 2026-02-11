@@ -1,6 +1,5 @@
 const mediaListEl = document.getElementById("mediaList");
 const searchInput = document.getElementById("searchInput");
-const scanStatusEl = document.getElementById("scanStatus");
 const jobsListEl = document.getElementById("jobsList");
 const rescanBtn = document.getElementById("rescan");
 
@@ -20,27 +19,20 @@ let mediaItems = [];
 let currentMedia = null;
 let jobPollTimer = null;
 let hadActiveJobs = false;
-let lastJobs = [];
-
-function setScanStatus(message) {
-  scanStatusEl.textContent = message;
-}
 
 async function fetchMedia(rescan = false) {
   const url = new URL("api/media", window.location.origin + window.location.pathname);
   if (rescan) {
     url.searchParams.set("rescan", "1");
-    setScanStatus("Scan requested...");
   }
   const response = await fetch(url);
   const data = await response.json();
   if (data.error) {
-    setScanStatus(`Error: ${data.error}`);
+    alert(`Error: ${data.error}`);
     return;
   }
   mediaItems = data.items || [];
   renderList();
-  updateStatusFromJobs(lastJobs);
 }
 
 function renderList() {
@@ -153,7 +145,7 @@ async function runGenerate() {
     });
     const data = await response.json();
     if (data.error) {
-      setScanStatus(`Error: ${data.error}`);
+      alert(`Error: ${data.error}`);
       return;
     }
     modal.classList.add("hidden");
@@ -212,37 +204,13 @@ async function fetchJobs() {
   const response = await fetch("api/jobs");
   const data = await response.json();
   const jobs = data.jobs || [];
-  lastJobs = jobs;
   renderJobs(jobs);
-  updateStatusFromJobs(jobs);
 
   const activeNow = jobs.some((job) => ["queued", "running", "cancelling"].includes(job.status));
   if (!activeNow && hadActiveJobs) {
     fetchMedia(false);
   }
   hadActiveJobs = activeNow;
-}
-
-function updateStatusFromJobs(jobs) {
-  const scanJobs = jobs.filter((job) => job.type === "scan");
-  const activeScan = scanJobs.find((job) => ["queued", "running", "cancelling"].includes(job.status));
-  const recentScan = scanJobs.length ? scanJobs[0] : null;
-
-  if (activeScan) {
-    const pct = Number(activeScan.progress_percent || 0);
-    const msg = activeScan.message || "Scanning...";
-    setScanStatus(`Scan running ${pct > 0 ? `(${pct}%)` : ""}: ${msg}`);
-    return;
-  }
-  if (recentScan && recentScan.status === "failed") {
-    setScanStatus(`Scan failed: ${recentScan.error || "Unknown error"}`);
-    return;
-  }
-  if (recentScan && recentScan.status === "canceled") {
-    setScanStatus("Scan canceled.");
-    return;
-  }
-  setScanStatus(`${mediaItems.length} videos found.`);
 }
 
 function renderJobs(jobs) {
