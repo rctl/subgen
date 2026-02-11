@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -11,6 +12,7 @@ from typing import Callable, Dict, List, Optional
 
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".webm"}
 SUBTITLE_EXTENSIONS = {".srt", ".vtt", ".ass", ".ssa", ".sub"}
+INDEX_FILENAME = "subgen.json"
 
 
 def scan_media(
@@ -45,6 +47,85 @@ def scan_media(
                     }
                 )
     return sorted(items, key=lambda item: str(item.get("title", "")).lower())
+
+
+def scan_media_with_index(
+    base_dir: str,
+    full_scan: bool,
+    progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+) -> List[Dict[str, object]]:
+    base_path = Path(base_dir).resolve()
+    index_path = base_path / INDEX_FILENAME
+
+    indexed_items = _load_index_items(index_path)
+    indexed_map: Dict[str, Dict[str, object]] = {}
+    for item in indexed_items:
+        path = str(item.get("path", ""))
+        if path:
+            indexed_map[path] = item
+
+    if full_scan:
+        items = scan_media(
+            base_dir=str(base_path),
+            progress_callback=progress_callback,
+            should_cancel=should_cancel,
+        )
+        _save_index_items(index_path, items)
+        return items
+
+    items = list(indexed_map.values())
+    total_files = _count_files(base_path)
+    scanned_files = 0
+    scanned_videos = len(items)
+    for root, _, files in os.walk(base_path):
+        if should_cancel and should_cancel():
+            raise RuntimeError("Job canceled.")
+        for name in files:
+            if should_cancel and should_cancel():
+                raise RuntimeError("Job canceled.")
+            path = Path(root) / name
+            scanned_files += 1
+            if path.suffix.lower() not in VIDEO_EXTENSIONS:
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "total_files": total_files,
+                            "scanned_files": scanned_files,
+                            "scanned_videos": scanned_videos,
+                            "current_file": str(path),
+                        }
+                    )
+                continue
+            normalized = str(path.resolve())
+            if normalized in indexed_map:
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "total_files": total_files,
+                            "scanned_files": scanned_files,
+                            "scanned_videos": scanned_videos,
+                            "current_file": str(path),
+                        }
+                    )
+                continue
+            described = describe_media(path)
+            indexed_map[normalized] = described
+            items.append(described)
+            scanned_videos += 1
+            if progress_callback:
+                progress_callback(
+                    {
+                        "total_files": total_files,
+                        "scanned_files": scanned_files,
+                        "scanned_videos": scanned_videos,
+                        "current_file": str(path),
+                    }
+                )
+
+    items_sorted = sorted(items, key=lambda item: str(item.get("title", "")).lower())
+    _save_index_items(index_path, items_sorted)
+    return items_sorted
 
 
 def describe_media(path: Path) -> Dict[str, object]:
@@ -215,3 +296,31 @@ def _count_files(base_path: Path) -> int:
     for _, _, files in os.walk(base_path):
         total += len(files)
     return total
+
+
+def _load_index_items(index_path: Path) -> List[Dict[str, object]]:
+    if not index_path.exists() or not index_path.is_file():
+        return []
+    try:
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(payload, dict):
+        return []
+    items = payload.get("items", [])
+    if not isinstance(items, list):
+        return []
+    output: List[Dict[str, object]] = []
+    for item in items:
+        if isinstance(item, dict):
+            output.append(item)
+    return output
+
+
+def _save_index_items(index_path: Path, items: List[Dict[str, object]]) -> None:
+    payload = {
+        "version": 1,
+        "updated_at": int(time.time()),
+        "items": items,
+    }
+    index_path.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")

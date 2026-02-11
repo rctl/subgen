@@ -15,7 +15,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from .library import (
     describe_media,
     extract_embedded_sub,
-    scan_media,
+    scan_media_with_index,
 )
 from .subtitles import format_srt, parse_srt
 from .transcribe import transcribe_media
@@ -49,7 +49,7 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     app.config["JOB_LOCK"] = threading.Lock()
     app.config["JOBS"] = {}
     print(f"[subgen] config base_dir={base_dir} stt_endpoint={stt_endpoint}")
-    _start_scan(app)
+    _start_scan(app, full_scan=True)
 
     @app.route("/")
     def index():
@@ -63,7 +63,7 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     def api_media():
         rescan = request.args.get("rescan") == "1"
         if rescan:
-            _start_scan(app)
+            _start_scan(app, full_scan=False)
         items = app.config.get("MEDIA_CACHE", [])
         return jsonify({"media_dir": app.config["BASE_DIR"], "items": items})
 
@@ -368,19 +368,21 @@ def _percent(current: int, total: int) -> int:
     return int(max(0, min(100, (current * 100) // total)))
 
 
-def _start_scan(app: Flask) -> None:
+def _start_scan(app: Flask, full_scan: bool) -> None:
     with app.config["JOB_LOCK"]:
         for job in app.config["JOBS"].values():
             if job.get("type") == "scan" and job.get("status") in {"queued", "running", "cancelling"}:
                 return
-    job_id = _create_job_record(app, job_type="scan", name="Media library scan")
-    thread = threading.Thread(target=_scan_worker, args=(app, job_id), daemon=True)
+    scan_name = "Media library scan (full)" if full_scan else "Media library scan (delta)"
+    job_id = _create_job_record(app, job_type="scan", name=scan_name)
+    thread = threading.Thread(target=_scan_worker, args=(app, job_id, full_scan), daemon=True)
     thread.start()
 
 
-def _scan_worker(app: Flask, job_id: str) -> None:
-    print("[subgen] scanning media library...")
-    _update_job(app, job_id, status="running", stage="scan", message="Scanning media files")
+def _scan_worker(app: Flask, job_id: str, full_scan: bool) -> None:
+    mode = "full" if full_scan else "delta"
+    print(f"[subgen] scanning media library ({mode})...")
+    _update_job(app, job_id, status="running", stage="scan", message=f"Scanning media files ({mode})")
 
     def on_progress(progress: Dict[str, object]) -> None:
         current = int(progress.get("scanned_files", 0))
@@ -391,26 +393,30 @@ def _scan_worker(app: Flask, job_id: str) -> None:
             app,
             job_id,
             stage="scan",
-            message=f"Scanning {current}/{total or '?'} files, videos found: {videos}, latest: {Path(current_file).name}",
+            message=(
+                f"Scanning ({mode}) {current}/{total or '?'} files, videos found: {videos}, "
+                f"latest: {Path(current_file).name}"
+            ),
             progress_current=current,
             progress_total=total,
             progress_percent=_percent(current, total),
         )
 
     try:
-        items = scan_media(
+        items = scan_media_with_index(
             app.config["BASE_DIR"],
+            full_scan=full_scan,
             progress_callback=on_progress,
             should_cancel=lambda: _is_cancel_requested(app, job_id),
         )
         app.config["MEDIA_CACHE"] = items
-        print(f"[subgen] scan complete: {len(items)} items")
+        print(f"[subgen] scan complete ({mode}): {len(items)} items")
         _update_job(
             app,
             job_id,
             status="completed",
             stage="done",
-            message=f"Scan complete: {len(items)} videos found",
+            message=f"Scan complete ({mode}): {len(items)} videos found",
             progress_current=100,
             progress_total=100,
             progress_percent=100,
