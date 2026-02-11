@@ -48,6 +48,10 @@ function renderList() {
     title.className = "media-title";
     title.textContent = item.title;
 
+    const filename = document.createElement("div");
+    filename.className = "media-filename";
+    filename.textContent = item.filename || item.path.split("/").pop() || "";
+
     const path = document.createElement("div");
     path.className = "media-path";
     path.textContent = item.path;
@@ -74,6 +78,7 @@ function renderList() {
     button.addEventListener("click", () => openModal(item));
 
     card.appendChild(title);
+    card.appendChild(filename);
     card.appendChild(path);
     card.appendChild(badges);
     card.appendChild(button);

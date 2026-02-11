@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -49,10 +50,11 @@ def scan_media(
 def describe_media(path: Path) -> Dict[str, object]:
     embedded = probe_embedded_subs(path)
     sidecar = find_sidecar_subs(path)
-    title = probe_title(path) or path.stem
+    title = probe_nfo_title(path) or probe_title(path) or path.stem
     return {
         "id": _hash_id(str(path)),
         "path": str(path),
+        "filename": path.name,
         "title": title,
         "embedded_subs": embedded,
         "sidecar_subs": sidecar,
@@ -121,6 +123,22 @@ def probe_title(path: Path) -> Optional[str]:
     title = tags.get("title")
     if isinstance(title, str) and title.strip():
         return title.strip()
+    return None
+
+
+def probe_nfo_title(path: Path) -> Optional[str]:
+    candidates = [path.with_suffix(".nfo"), path.parent / "movie.nfo"]
+    for nfo_path in candidates:
+        if not nfo_path.exists() or not nfo_path.is_file():
+            continue
+        try:
+            tree = ET.parse(nfo_path)
+            root = tree.getroot()
+        except ET.ParseError:
+            continue
+        title = root.findtext("title")
+        if isinstance(title, str) and title.strip():
+            return title.strip()
     return None
 
 

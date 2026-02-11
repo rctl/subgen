@@ -316,10 +316,17 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
             app,
             job_id,
             stage=str(progress.get("stage", "transcribe")),
-            message=f"Transcribing chunk {int(progress.get('chunk_index', 0))}",
-            progress_current=int(progress.get("processed_seconds", 0)),
-            progress_total=0,
-            progress_percent=0,
+            message=(
+                f"Transcribing chunk {int(progress.get('chunk_index', 0))}"
+                + (
+                    f"/{int(progress.get('total_chunks', 0))}"
+                    if int(progress.get("total_chunks", 0)) > 0
+                    else ""
+                )
+            ),
+            progress_current=int(progress.get("chunk_index", 0)),
+            progress_total=int(progress.get("total_chunks", 0)),
+            progress_percent=int(progress.get("progress_percent", 0)),
         ),
         should_cancel=should_cancel,
     )

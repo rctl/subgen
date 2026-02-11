@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -65,6 +67,7 @@ def transcribe_media(
     process = start_ffmpeg_pcm(str(media_path), sample_rate)
     if not process.stdout:
         raise RuntimeError("ffmpeg did not provide stdout.")
+    total_chunks = _estimate_total_chunks(media_path, chunk_seconds)
 
     def read_chunk(reader, size: int) -> bytes:
         remaining = size
@@ -98,10 +101,13 @@ def transcribe_media(
         offset = max(chunk_index * chunk_seconds - overlap_used, 0)
 
         if progress_callback:
+            percent = int((chunk_index + 1) * 100 / total_chunks) if total_chunks > 0 else 0
             progress_callback(
                 {
                     "stage": "transcribe",
                     "chunk_index": chunk_index + 1,
+                    "total_chunks": total_chunks,
+                    "progress_percent": min(100, percent),
                     "processed_seconds": (chunk_index + 1) * chunk_seconds,
                 }
             )
@@ -141,3 +147,25 @@ def transcribe_media(
     if process.returncode not in (0, None):
         raise RuntimeError("ffmpeg failed during transcription.")
     return segments
+
+
+def _estimate_total_chunks(media_path: Path, chunk_seconds: int) -> int:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "json",
+        str(media_path),
+    ]
+    try:
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        payload = json.loads(output.decode("utf-8", errors="ignore"))
+        duration = float(payload.get("format", {}).get("duration", 0.0))
+    except (subprocess.CalledProcessError, json.JSONDecodeError, ValueError, TypeError):
+        return 0
+    if duration <= 0:
+        return 0
+    return max(1, int(math.ceil(duration / max(chunk_seconds, 1))))

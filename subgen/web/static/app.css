@@ -178,6 +178,14 @@ main {
   text-overflow: ellipsis;
 }
 
+.media-filename {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .media-path {
   font-size: 12px;
   color: var(--muted);
