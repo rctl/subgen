@@ -26,6 +26,8 @@ Translation notes:
 - Translated output is written to `output.{lang}.srt` (e.g., `MovieName.sv.srt`).
 - If the original `output.srt` already exists, STT is skipped unless `--force-stt` is used.
 - For Jellyfin to detect subtitles, keep the subtitle file next to the video and include the movie filename (e.g., `MovieName.gen_en.srt`).
+- Transcription now uses VAD-gated sub-segments (threshold `0.30`) to skip obvious non-speech audio.
+- VAD debug logs are printed to stdout per chunk with max score and kept regions.
 
 ## Web UI
 Run the web UI server:

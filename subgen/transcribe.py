@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+import numpy as np
 import requests
 
 
@@ -61,6 +62,20 @@ def transcribe_media(
     from .subtitles import normalize_text
 
     bytes_per_sample = 2
+    vad_threshold = 0.30
+    vad_frame_ms = 30
+    vad_padding_ms = 450
+    vad_min_speech_ms = 180
+    vad_min_gap_ms = 220
+
+    try:
+        from openwakeword.vad import VAD
+
+        vad_model = VAD()
+    except Exception as exc:
+        vad_model = None
+        print(f"[subgen][vad] disabled ({exc})", flush=True)
+
     chunk_bytes = sample_rate * bytes_per_sample * chunk_seconds
     overlap_bytes = sample_rate * bytes_per_sample * overlap_seconds
 
@@ -112,33 +127,74 @@ def transcribe_media(
                 }
             )
 
-        result = transcribe_pcm(
-            endpoint,
-            payload,
-            sample_rate,
-            language=language,
-            api_key=api_key,
-            timeout=timeout,
+        regions = _compute_regions_from_vad(
+            vad_model=vad_model,
+            pcm_bytes=payload,
+            sample_rate=sample_rate,
+            threshold=vad_threshold,
+            frame_ms=vad_frame_ms,
+            padding_ms=vad_padding_ms,
+            min_speech_ms=vad_min_speech_ms,
+            min_gap_ms=vad_min_gap_ms,
         )
-        for seg in result.get("segments", []):
-            start = float(seg.get("start", 0.0))
-            end = float(seg.get("end", 0.0))
-            text = str(seg.get("text", "")).strip()
-            if not text or end <= 0:
+        if vad_model is None:
+            regions = [{"start": 0.0, "end": len(payload) / float(sample_rate * bytes_per_sample), "max_score": 1.0}]
+
+        if regions:
+            max_score = max(float(r.get("max_score", 0.0)) for r in regions)
+        else:
+            max_score = 0.0
+        print(
+            f"[subgen][vad] chunk={chunk_index + 1} threshold={vad_threshold:.2f} regions={len(regions)} max={max_score:.3f}",
+            flush=True,
+        )
+
+        for region_index, region in enumerate(regions, start=1):
+            region_start = float(region["start"])
+            region_end = float(region["end"])
+            if region_end <= region_start:
                 continue
-            if end <= overlap_used:
+
+            start_byte = int(region_start * sample_rate * bytes_per_sample)
+            end_byte = int(region_end * sample_rate * bytes_per_sample)
+            start_byte = max(0, min(start_byte, len(payload)))
+            end_byte = max(start_byte, min(end_byte, len(payload)))
+            if end_byte - start_byte < sample_rate * bytes_per_sample * 0.1:
                 continue
-            if start < overlap_used:
-                start = overlap_used
-            if end <= start:
-                continue
-            prepared = {"start": start + offset, "end": end + offset, "text": text}
-            norm = normalize_text(prepared["text"])
-            if norm and norm == last_norm and prepared["start"] <= last_end + 0.1:
-                continue
-            segments.append(prepared)
-            last_norm = norm
-            last_end = float(prepared["end"])
+
+            region_payload = payload[start_byte:end_byte]
+            print(
+                f"[subgen][vad] chunk={chunk_index + 1} region={region_index} start={region_start:.3f}s end={region_end:.3f}s bytes={len(region_payload)} score={float(region.get('max_score', 0.0)):.3f}",
+                flush=True,
+            )
+
+            result = transcribe_pcm(
+                endpoint,
+                region_payload,
+                sample_rate,
+                language=language,
+                api_key=api_key,
+                timeout=timeout,
+            )
+            for seg in result.get("segments", []):
+                start = float(seg.get("start", 0.0)) + region_start
+                end = float(seg.get("end", 0.0)) + region_start
+                text = str(seg.get("text", "")).strip()
+                if not text or end <= 0:
+                    continue
+                if end <= overlap_used:
+                    continue
+                if start < overlap_used:
+                    start = overlap_used
+                if end <= start:
+                    continue
+                prepared = {"start": start + offset, "end": end + offset, "text": text}
+                norm = normalize_text(prepared["text"])
+                if norm and norm == last_norm and prepared["start"] <= last_end + 0.1:
+                    continue
+                segments.append(prepared)
+                last_norm = norm
+                last_end = float(prepared["end"])
 
         overlap_tail = chunk[-overlap_bytes:] if overlap_bytes and len(chunk) >= overlap_bytes else chunk
         chunk_index += 1
@@ -169,3 +225,88 @@ def _estimate_total_chunks(media_path: Path, chunk_seconds: int) -> int:
     if duration <= 0:
         return 0
     return max(1, int(math.ceil(duration / max(chunk_seconds, 1))))
+
+
+def _compute_regions_from_vad(
+    vad_model: object,
+    pcm_bytes: bytes,
+    sample_rate: int,
+    threshold: float,
+    frame_ms: int,
+    padding_ms: int,
+    min_speech_ms: int,
+    min_gap_ms: int,
+) -> List[Dict[str, float]]:
+    if vad_model is None or sample_rate <= 0:
+        return []
+
+    frame_samples = int(sample_rate * frame_ms / 1000)
+    if frame_samples <= 0:
+        return []
+    frame_bytes = frame_samples * 2
+    if frame_bytes <= 0:
+        return []
+
+    usable = (len(pcm_bytes) // frame_bytes) * frame_bytes
+    if usable <= 0:
+        return []
+
+    pcm = np.frombuffer(pcm_bytes[:usable], dtype=np.int16)
+    total_frames = usable // frame_bytes
+    scores: List[float] = []
+    for i in range(total_frames):
+        start = i * frame_samples
+        end = start + frame_samples
+        frame = pcm[start:end]
+        score = float(vad_model.predict(frame, frame_size=frame_samples))
+        scores.append(score)
+
+    active: List[Dict[str, float]] = []
+    current_start: Optional[int] = None
+    current_max = 0.0
+    for i, score in enumerate(scores):
+        if score >= threshold:
+            if current_start is None:
+                current_start = i
+                current_max = score
+            else:
+                current_max = max(current_max, score)
+        elif current_start is not None:
+            active.append({"start_frame": float(current_start), "end_frame": float(i), "max_score": float(current_max)})
+            current_start = None
+            current_max = 0.0
+    if current_start is not None:
+        active.append(
+            {"start_frame": float(current_start), "end_frame": float(total_frames), "max_score": float(current_max)}
+        )
+
+    if not active:
+        return []
+
+    min_gap_frames = max(1, int(min_gap_ms / frame_ms))
+    merged: List[Dict[str, float]] = []
+    for r in active:
+        if not merged:
+            merged.append(dict(r))
+            continue
+        prev = merged[-1]
+        gap = int(r["start_frame"] - prev["end_frame"])
+        if gap <= min_gap_frames:
+            prev["end_frame"] = r["end_frame"]
+            prev["max_score"] = max(float(prev["max_score"]), float(r["max_score"]))
+        else:
+            merged.append(dict(r))
+
+    pad_frames = max(0, int(padding_ms / frame_ms))
+    min_speech_frames = max(1, int(min_speech_ms / frame_ms))
+    regions: List[Dict[str, float]] = []
+    for r in merged:
+        start_frame = max(0, int(r["start_frame"]) - pad_frames)
+        end_frame = min(total_frames, int(r["end_frame"]) + pad_frames)
+        if end_frame - start_frame < min_speech_frames:
+            continue
+        start_s = (start_frame * frame_samples) / float(sample_rate)
+        end_s = (end_frame * frame_samples) / float(sample_rate)
+        regions.append({"start": start_s, "end": end_s, "max_score": float(r["max_score"])})
+
+    return regions
