@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import subprocess
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
@@ -68,6 +69,7 @@ def transcribe_media(
     if not process.stdout:
         raise RuntimeError("ffmpeg did not provide stdout.")
     total_chunks = _estimate_total_chunks(media_path, chunk_seconds)
+    speech_intervals = _detect_speech_intervals(media_path)
 
     def read_chunk(reader, size: int) -> bytes:
         remaining = size
@@ -132,8 +134,16 @@ def transcribe_media(
                 start = overlap_used
             if end <= start:
                 continue
+            if speech_intervals:
+                overlap, aligned_start, aligned_end = _speech_overlap(start + offset, end + offset, speech_intervals)
+                if overlap <= 0:
+                    continue
+                start = max(aligned_start - offset, 0.0)
+                end = max(aligned_end - offset, start + 0.01)
             prepared = {"start": start + offset, "end": end + offset, "text": text}
             norm = normalize_text(prepared["text"])
+            if not _is_plausible_text(prepared["text"], language):
+                continue
             if norm and norm == last_norm and prepared["start"] <= last_end + 0.1:
                 continue
             segments.append(prepared)
@@ -169,3 +179,119 @@ def _estimate_total_chunks(media_path: Path, chunk_seconds: int) -> int:
     if duration <= 0:
         return 0
     return max(1, int(math.ceil(duration / max(chunk_seconds, 1))))
+
+
+def _detect_speech_intervals(media_path: Path) -> List[Tuple[float, float]]:
+    cmd = [
+        "ffmpeg",
+        "-i",
+        str(media_path),
+        "-af",
+        "silencedetect=noise=-38dB:d=0.35",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, check=False)
+    except OSError:
+        return []
+    log = proc.stderr or ""
+    duration = _estimate_duration_seconds(media_path)
+    if duration <= 0:
+        return []
+    silence_intervals = _parse_silence_intervals(log, duration)
+    if not silence_intervals:
+        return [(0.0, duration)]
+    speech: List[Tuple[float, float]] = []
+    cursor = 0.0
+    for start, end in silence_intervals:
+        if start > cursor:
+            speech.append((cursor, start))
+        cursor = max(cursor, end)
+    if cursor < duration:
+        speech.append((cursor, duration))
+    return [(max(0.0, s), max(0.0, e)) for s, e in speech if e - s >= 0.08]
+
+
+def _estimate_duration_seconds(media_path: Path) -> float:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "json",
+        str(media_path),
+    ]
+    try:
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        payload = json.loads(output.decode("utf-8", errors="ignore"))
+        return float(payload.get("format", {}).get("duration", 0.0))
+    except (subprocess.CalledProcessError, json.JSONDecodeError, ValueError, TypeError):
+        return 0.0
+
+
+def _parse_silence_intervals(log: str, duration: float) -> List[Tuple[float, float]]:
+    starts = [float(v) for v in re.findall(r"silence_start:\s*([0-9]+(?:\.[0-9]+)?)", log)]
+    ends = [float(v) for v in re.findall(r"silence_end:\s*([0-9]+(?:\.[0-9]+)?)", log)]
+    intervals: List[Tuple[float, float]] = []
+    i = 0
+    j = 0
+    while i < len(starts) or j < len(ends):
+        if i < len(starts):
+            s = starts[i]
+            i += 1
+        else:
+            s = 0.0
+        if j < len(ends):
+            e = ends[j]
+            j += 1
+        else:
+            e = duration
+        if e > s:
+            intervals.append((s, e))
+    return intervals
+
+
+def _speech_overlap(start: float, end: float, speech_intervals: List[Tuple[float, float]]) -> Tuple[float, float, float]:
+    overlap = 0.0
+    first: Optional[float] = None
+    last: Optional[float] = None
+    for s, e in speech_intervals:
+        if e <= start:
+            continue
+        if s >= end:
+            break
+        left = max(start, s)
+        right = min(end, e)
+        if right <= left:
+            continue
+        overlap += right - left
+        if first is None:
+            first = left
+        last = right
+    if first is None or last is None:
+        return 0.0, start, end
+    return overlap, first, last
+
+
+def _is_plausible_text(text: str, language: str) -> bool:
+    t = " ".join(text.strip().split())
+    if len(t) < 2:
+        return False
+    if re.search(r"(.)\1\1\1\1", t):
+        return False
+    cjk_count = len(re.findall(r"[\u4e00-\u9fff]", t))
+    alpha_count = len(re.findall(r"[A-Za-z\u00C0-\u024F\u00C5\u00C4\u00D6\u00E5\u00E4\u00F6]", t))
+    alnum_like = cjk_count + alpha_count + len(re.findall(r"[0-9]", t))
+    symbol_count = len(re.findall(r"[^\w\s\u4e00-\u9fff]", t))
+    if symbol_count > alnum_like and len(t) > 6:
+        return False
+    lang_norm = (language or "").lower()
+    if lang_norm.startswith("zh"):
+        return cjk_count > 0 or alpha_count >= 2
+    if lang_norm.startswith("en") or lang_norm.startswith("sv"):
+        return alpha_count >= 2
+    return (cjk_count + alpha_count) >= 2
