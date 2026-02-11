@@ -15,6 +15,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from .library import (
     describe_media,
     extract_embedded_sub,
+    load_media_index,
     save_media_index,
     scan_media_with_index,
 )
@@ -46,9 +47,13 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     app = Flask(__name__, static_folder="web/static")
     app.config["BASE_DIR"] = base_dir
     app.config["STT_ENDPOINT"] = stt_endpoint
-    app.config["MEDIA_CACHE"] = []
+    app.config["MEDIA_CACHE"] = load_media_index(base_dir)
     app.config["JOB_LOCK"] = threading.Lock()
     app.config["JOBS"] = {}
+    if app.config["MEDIA_CACHE"]:
+        print(f"[subgen] loaded {len(app.config['MEDIA_CACHE'])} media items from subgen.json")
+    else:
+        print("[subgen] no cached media index loaded")
     print(f"[subgen] config base_dir={base_dir} stt_endpoint={stt_endpoint}")
     _start_scan(app, full_scan=True)
 

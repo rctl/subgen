@@ -141,6 +141,13 @@ def save_media_index(base_dir: str, items: List[Dict[str, object]], async_write:
     _save_index_items(index_path, items, async_write=async_write)
 
 
+def load_media_index(base_dir: str) -> List[Dict[str, object]]:
+    base_path = Path(base_dir).resolve()
+    index_path = base_path / INDEX_FILENAME
+    items = _load_index_items(index_path)
+    return sorted(items, key=lambda item: str(item.get("title", "")).lower())
+
+
 def describe_media(path: Path) -> Dict[str, object]:
     embedded = probe_embedded_subs(path)
     sidecar = find_sidecar_subs(path)
