@@ -1,10 +1,20 @@
-# subgen
+# subgen - Automated subtitle generation via speech-to-text & translation.
 
-Generate SRT subtitles from video files using the Jarvis `stt-server`.
+Subgen helps you automatically generate subtitle files for any media using OpenAI Whisper STT model, and can also optionally translate into any language using either Google Translate API (good for most use-cases) or Anthropic Claude (enhances semantic understanding for improved translation). This project can be used in conjunction with ex. Jellyfin/Plex to supplement media where subtitle is missing, and allows for seamless translation on the fly.
+
+> Note! I didn't have much time to work on this, so this code is 100% vibe-coded! It works, surprisingly well, but might have some unknown bugs. I tested most flows and it has been working fine for me, but be aware of the risks.
+
+
+For translation to work you will need to provide a Google Cloud API key or Anthropic API key. See config example.
+
+Note, this project requires running stand alone STT server (micro service) available here: https://github.com/rctl/stt-server
+The STT server itself can be used for many differnt use-cases, and allows for more easy sharing of GPU memory between various applications that require STT integration.
+
 
 ## Requirements
 - Python 3.10+
 - `ffmpeg` in PATH
+- Standalone STT server, see: https://github.com/rctl/stt-server
 
 ## Install
 ```bash
@@ -22,7 +32,7 @@ python -m subgen \
 ```
 
 Translation notes:
-- Set `GOOGLE_TRANSLATE_API_KEY` or pass `--google-api-key`.
+- Set `GOOGLE_TRANSLATE_API_KEY`, pass `--google-api-key` or provide in `config.json`.
 - Translated output is written to `output.{lang}.srt` (e.g., `MovieName.sv.srt`).
 - If the original `output.srt` already exists, STT is skipped unless `--force-stt` is used.
 - For Jellyfin to detect subtitles, keep the subtitle file next to the video and include the movie filename (e.g., `MovieName.gen_en.srt`).
