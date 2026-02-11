@@ -18,7 +18,11 @@
   </header>
 
   <main>
-    <div id="status" class="status"></div>
+    <div id="scanStatus" class="status"></div>
+    <div class="jobs-panel">
+      <div class="jobs-header">Jobs</div>
+      <div id="jobsList" class="jobs-list"></div>
+    </div>
     <div id="mediaList" class="media-list"></div>
   </main>
 
@@ -64,10 +68,7 @@
         <div class="hint">Generated subtitles are saved next to the video as <code>gen_[lang].srt</code>.</div>
       </div>
       <div class="modal-footer">
-        <button id="runGenerate">
-          <span class="spinner hidden" id="generateSpinner"></span>
-          <span id="generateLabel">Generate</span>
-        </button>
+        <button id="runGenerate">Generate</button>
       </div>
     </div>
   </div>

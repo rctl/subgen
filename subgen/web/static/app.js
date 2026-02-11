@@ -1,6 +1,7 @@
 const mediaListEl = document.getElementById("mediaList");
 const searchInput = document.getElementById("searchInput");
-const statusEl = document.getElementById("status");
+const scanStatusEl = document.getElementById("scanStatus");
+const jobsListEl = document.getElementById("jobsList");
 const rescanBtn = document.getElementById("rescan");
 
 const modal = document.getElementById("modal");
@@ -12,8 +13,6 @@ const translateTargetLangInput = document.getElementById("translateTargetLang");
 const modeSelect = document.getElementById("mode");
 const existingSubSelect = document.getElementById("existingSub");
 const runGenerateBtn = document.getElementById("runGenerate");
-const generateSpinner = document.getElementById("generateSpinner");
-const generateLabel = document.getElementById("generateLabel");
 const transcribeFields = document.getElementById("transcribeFields");
 const translateFields = document.getElementById("translateFields");
 
@@ -22,21 +21,22 @@ let currentMedia = null;
 let scanStatusTimer = null;
 let scanWasRunning = false;
 let jobPollTimer = null;
+let hadActiveJobs = false;
 
-function setStatus(message) {
-  statusEl.textContent = message;
+function setScanStatus(message) {
+  scanStatusEl.textContent = message;
 }
 
 async function fetchMedia(rescan = false) {
   const url = new URL("api/media", window.location.origin + window.location.pathname);
   if (rescan) {
     url.searchParams.set("rescan", "1");
-    setStatus("Rescan started...");
+    setScanStatus("Rescan started...");
   }
   const response = await fetch(url);
   const data = await response.json();
   if (data.error) {
-    setStatus(`Error: ${data.error}`);
+    setScanStatus(`Error: ${data.error}`);
     return;
   }
   mediaItems = data.items || [];
@@ -58,20 +58,20 @@ async function fetchScanStatus() {
 
 function updateScanStatus(scan) {
   if (!scan) {
-    setStatus(`${mediaItems.length} videos found.`);
+    setScanStatus(`${mediaItems.length} videos found.`);
     return;
   }
   if (scan.running) {
     const total = Number(scan.total_files || 0);
     const scanned = Number(scan.scanned_files || 0);
     const percent = total > 0 ? Math.floor((scanned / total) * 100) : 0;
-    setStatus(
+    setScanStatus(
       `Scanning media: ${scanned}/${total || "?"} files (${percent}%), videos found: ${scan.scanned_videos || 0}`
     );
   } else if (scan.error) {
-    setStatus(`Scan failed: ${scan.error}`);
+    setScanStatus(`Scan failed: ${scan.error}`);
   } else {
-    setStatus(`${mediaItems.length} videos found.`);
+    setScanStatus(`${mediaItems.length} videos found.`);
   }
 }
 
@@ -158,8 +158,7 @@ function populateExistingSubs(item) {
 
 async function runGenerate() {
   if (!currentMedia) return;
-  setGenerateState(true);
-  setStatus("Queued subtitle generation...");
+  runGenerateBtn.disabled = true;
   let payload = { media_path: currentMedia.path };
   if (modeSelect.value === "translate") {
     payload = {
@@ -187,12 +186,13 @@ async function runGenerate() {
   });
   const data = await response.json();
   if (data.error) {
-    setStatus(`Error: ${data.error}`);
-    setGenerateState(false);
+    runGenerateBtn.disabled = false;
+    setScanStatus(`Error: ${data.error}`);
     return;
   }
+  runGenerateBtn.disabled = false;
   modal.classList.add("hidden");
-  pollJob(data.job_id);
+  fetchJobs();
 }
 
 searchInput.addEventListener("input", renderList);
@@ -204,7 +204,8 @@ modeSelect.addEventListener("change", toggleModeFields);
 fetchMedia();
 populateLanguageOptions();
 scanStatusTimer = setInterval(fetchScanStatus, 1500);
-jobPollTimer = setInterval(pollLatestJob, 2000);
+fetchJobs();
+jobPollTimer = setInterval(fetchJobs, 2000);
 
 function toggleModeFields() {
   const isTranslate = modeSelect.value === "translate";
@@ -251,54 +252,70 @@ function populateLanguageOptions() {
   translateTargetLangInput.value = "en";
 }
 
-function setGenerateState(active) {
-  runGenerateBtn.disabled = active;
-  generateSpinner.classList.toggle("hidden", !active);
-  generateLabel.textContent = active ? "Generating..." : "Generate";
-}
-
-async function pollJob(jobId) {
-  if (!jobId) {
-    setGenerateState(false);
-    return;
-  }
-  let done = false;
-  while (!done) {
-    const response = await fetch(`api/jobs/${jobId}`);
-    const data = await response.json();
-    if (data.error) {
-      setStatus(`Error: ${data.error}`);
-      setGenerateState(false);
-      return;
-    }
-    if (data.status === "completed") {
-      setStatus(`Generated: ${data.outputs?.join(", ") || ""}`);
-      done = true;
-      break;
-    }
-    if (data.status === "failed") {
-      setStatus(`Error: ${data.error || "Job failed"}`);
-      done = true;
-      break;
-    }
-    if (data.stage && data.message) {
-      setStatus(`${data.stage}: ${data.message}`);
-    } else if (data.stage) {
-      setStatus(`Working: ${data.stage}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-  }
-  setGenerateState(false);
-  fetchMedia(false);
-}
-
-async function pollLatestJob() {
+async function fetchJobs() {
   const response = await fetch("api/jobs");
   const data = await response.json();
   const jobs = data.jobs || [];
-  if (!jobs.length) return;
-  const active = jobs.find((job) => job.status === "running" || job.status === "queued");
-  if (active) {
-    pollJob(active.id);
+  renderJobs(jobs);
+  const activeNow = jobs.some((job) => job.status === "running" || job.status === "queued");
+  if (!activeNow && hadActiveJobs) {
+    fetchMedia(false);
   }
+  hadActiveJobs = activeNow;
+}
+
+function renderJobs(jobs) {
+  jobsListEl.innerHTML = "";
+  if (!jobs.length) {
+    const empty = document.createElement("div");
+    empty.className = "job-empty";
+    empty.textContent = "No jobs yet.";
+    jobsListEl.appendChild(empty);
+    return;
+  }
+
+  jobs.forEach((job) => {
+    const card = document.createElement("div");
+    card.className = "job-card";
+
+    const left = document.createElement("div");
+    const topLine = document.createElement("div");
+    topLine.className = "job-line";
+    if (job.status === "running" || job.status === "queued") {
+      const spin = document.createElement("span");
+      spin.className = "spinner small";
+      topLine.appendChild(spin);
+    }
+    const statusText = document.createElement("span");
+    statusText.textContent = `${job.status} • ${job.stage || "unknown"}`;
+    topLine.appendChild(statusText);
+
+    const subLine = document.createElement("div");
+    subLine.className = "job-sub";
+    if (job.status === "failed") {
+      subLine.classList.add("job-error");
+      subLine.textContent = job.error || "Job failed";
+    } else if (job.message) {
+      subLine.textContent = job.message;
+    } else if (job.outputs && job.outputs.length) {
+      subLine.textContent = `Output: ${job.outputs.join(", ")}`;
+    } else {
+      subLine.textContent = `Job ${job.id}`;
+    }
+
+    left.appendChild(topLine);
+    left.appendChild(subLine);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "job-delete";
+    deleteBtn.textContent = "X";
+    deleteBtn.addEventListener("click", async () => {
+      await fetch(`api/jobs/${job.id}`, { method: "DELETE" });
+      fetchJobs();
+    });
+
+    card.appendChild(left);
+    card.appendChild(deleteBtn);
+    jobsListEl.appendChild(card);
+  });
 }

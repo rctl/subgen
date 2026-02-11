@@ -91,6 +91,63 @@ main {
   margin-bottom: 16px;
 }
 
+.jobs-panel {
+  margin-bottom: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.jobs-header {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.job-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.job-line {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.job-sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.job-error {
+  color: var(--danger);
+}
+
+.job-empty {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.job-delete {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 .media-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -202,6 +259,13 @@ main {
   margin-right: 8px;
   animation: spin 1s linear infinite;
   vertical-align: middle;
+}
+
+.spinner.small {
+  width: 11px;
+  height: 11px;
+  border-width: 1.5px;
+  margin-right: 6px;
 }
 
 @keyframes spin {

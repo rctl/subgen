@@ -121,6 +121,12 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
         jobs.sort(key=lambda item: item.get("created_at", 0), reverse=True)
         return jsonify({"jobs": jobs})
 
+    @app.route("/api/jobs/<job_id>", methods=["DELETE"])
+    def api_job_delete(job_id: str):
+        with app.config["JOB_LOCK"]:
+            removed = app.config["JOBS"].pop(job_id, None)
+        return jsonify({"removed": bool(removed)})
+
     return app
 
 
