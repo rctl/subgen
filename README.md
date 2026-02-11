@@ -45,3 +45,9 @@ Translation provider selection is available in the UI with `Google Translate` an
 For Anthropic, set `anthropic_api_key` and `anthropic_model` in `config.json`.
 `anthropic_max_parallel` controls concurrent Anthropic batch requests and defaults to `5`.
 Anthropic model is passed through directly to the SDK exactly as configured.
+
+## Security
+- `config.json` is gitignored and should stay local/private.
+- Put real API keys only in `config.json` (or environment variables), never in tracked files.
+- Keep `config.example.json` with placeholder values only.
+- Before publishing to a public repo, verify no secrets are staged or present in commit history.
