@@ -155,10 +155,16 @@ def transcribe_media(
             if region_end <= region_start:
                 continue
 
-            start_byte = int(region_start * sample_rate * bytes_per_sample)
-            end_byte = int(region_end * sample_rate * bytes_per_sample)
+            start_sample = int(round(region_start * sample_rate))
+            end_sample = int(round(region_end * sample_rate))
+            start_byte = start_sample * bytes_per_sample
+            end_byte = end_sample * bytes_per_sample
             start_byte = max(0, min(start_byte, len(payload)))
             end_byte = max(start_byte, min(end_byte, len(payload)))
+            if start_byte % bytes_per_sample != 0:
+                start_byte -= start_byte % bytes_per_sample
+            if end_byte % bytes_per_sample != 0:
+                end_byte -= end_byte % bytes_per_sample
             if end_byte - start_byte < sample_rate * bytes_per_sample * 0.1:
                 continue
 
