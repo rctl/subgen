@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 from flask import Flask, jsonify, request, send_from_directory
 
 from .library import (
+    INDEX_FILENAME,
     describe_media,
     extract_embedded_sub,
     load_media_index,
@@ -64,7 +65,14 @@ def create_app(
     print(
         f"[subgen] config base_dir={base_dir} stt_endpoint={stt_endpoint} vad_threshold={vad_threshold:.2f}"
     )
-    _start_scan(app, full_scan=True)
+    startup_index_path = _startup_index_path(base_dir, index_path)
+    startup_has_index = startup_index_path.exists() and startup_index_path.is_file()
+    startup_full_scan = not startup_has_index
+    print(
+        f"[subgen] startup index_path={startup_index_path} exists={startup_has_index}; "
+        f"startup_scan={'full' if startup_full_scan else 'delta'}"
+    )
+    _start_scan(app, full_scan=startup_full_scan)
 
     @app.route("/")
     def index():
@@ -436,6 +444,16 @@ def _percent(current: int, total: int) -> int:
     if total <= 0:
         return 0
     return int(max(0, min(100, (current * 100) // total)))
+
+
+def _startup_index_path(base_dir: str, index_path: Optional[str]) -> Path:
+    base_path = Path(base_dir).resolve()
+    if index_path and str(index_path).strip():
+        candidate = Path(str(index_path).strip())
+        if candidate.is_absolute():
+            return candidate
+        return (base_path / candidate).resolve()
+    return base_path / INDEX_FILENAME
 
 
 def _start_scan(app: Flask, full_scan: bool) -> None:
