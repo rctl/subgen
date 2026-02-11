@@ -18,16 +18,10 @@ Subgen comes with a fully functioning WebUI for easy subtitle generation for new
 
 
 ## Requirements
-- Python 3.10+
-- `ffmpeg` in PATH
+
 - Standalone STT server, see: https://github.com/rctl/stt-server
 
-## Install
-```bash
-pip install -r requirements.txt
-```
-
-## Usage
+## Usage (Docker)
 
 The main recommended way to run this app is via docker. There's a pre-built image in `rctl/subgen:latest`.
 
@@ -39,7 +33,26 @@ docker run rctl/subgen:latest -v $(pwd)/config.json:/app/config.json -v /my/medi
 
 Default port is 8080.
 
-## CLI Usage
+Standalone STT server also need to be run (I will not cover how to handle GPU passthrough here, but it is possible):
+
+```
+docker run rctl/stt-server -p 8081:8000
+```
+
+
+
+## Usage (CLI)
+
+Requirements
+
+- Python 3.10+
+- `ffmpeg` in PATH
+
+Install Packages
+
+```bash
+pip install -r requirements.txt
+```
 
 ```bash
 python -m subgen \
@@ -58,7 +71,7 @@ Translation notes:
 - Transcription now uses VAD-gated sub-segments (threshold `0.30`) to skip obvious non-speech audio.
 - VAD debug logs are printed to stdout per chunk with max score and kept regions.
 
-## Web UI
+## Usage (Serve Web UI)
 Run the web UI server:
 ```bash
 python -m subgen.web --media-dir /path/to/media --endpoint https://stt.rtek.dev
@@ -74,9 +87,3 @@ Translation provider selection is available in the UI with `Google Translate` an
 For Anthropic, set `anthropic_api_key` and `anthropic_model` in `config.json`.
 `anthropic_max_parallel` controls concurrent Anthropic batch requests and defaults to `5`.
 Anthropic model is passed through directly to the SDK exactly as configured.
-
-## Security
-- `config.json` is gitignored and should stay local/private.
-- Put real API keys only in `config.json` (or environment variables), never in tracked files.
-- Keep `config.example.json` with placeholder values only.
-- Before publishing to a public repo, verify no secrets are staged or present in commit history.
