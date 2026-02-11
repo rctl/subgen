@@ -37,3 +37,6 @@ Open `http://localhost:8080` to browse media, inspect subtitles, and generate `g
 The web UI reads `media_dir` and `stt_endpoint` from `config.json` if CLI flags are not provided.
 It also supports optional `index_path` in `config.json` to override where the media index is stored.
 Relative `index_path` values are resolved under `media_dir`; absolute paths can place the index outside `media_dir`.
+Translation provider selection is available in the UI with `Google Translate` and `Anthropic`.
+`Google Translate` remains unchanged and uses `google_translate_api_key`.
+For Anthropic, set `anthropic_api_key` and `anthropic_model` in `config.json`.

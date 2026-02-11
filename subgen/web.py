@@ -21,7 +21,7 @@ from .library import (
 )
 from .subtitles import format_srt, parse_srt
 from .transcribe import transcribe_media
-from .translate import translate_segments
+from .translate import translate_segments, translate_segments_anthropic
 
 CONFIG_PATH = os.environ.get("SUBGEN_CONFIG_PATH", "/app/config.json")
 FALLBACK_CONFIG_PATH = os.path.join(os.getcwd(), "config.json")
@@ -120,6 +120,8 @@ def _generate_from_existing(
     media_path: Path,
     output_path_for,
     require_translate: bool = False,
+    translate_provider: str = "google",
+    anthropic_model: Optional[str] = None,
     progress_callback=None,
     should_cancel=None,
 ) -> Dict[str, object]:
@@ -147,11 +149,12 @@ def _generate_from_existing(
             outputs.append(str(output))
             return {"outputs": outputs}
 
-        translated = translate_segments(
-            segments,
-            target_lang,
-            api_key=_google_api_key(),
-            source_language=source_lang if source_lang != "und" else None,
+        translated = _translate_with_provider(
+            provider=translate_provider,
+            segments=segments,
+            target_lang=target_lang,
+            source_lang=source_lang,
+            anthropic_model=anthropic_model,
             progress_callback=progress_callback,
             should_cancel=should_cancel,
         )
@@ -180,6 +183,45 @@ def _google_api_key() -> str:
     if not key:
         raise ValueError("Google Translate API key is required for translation.")
     return key
+
+
+def _anthropic_api_key() -> str:
+    key = os.getenv("ANTHROPIC_API_KEY")
+    if not key:
+        raise ValueError("Anthropic API key is required for Anthropic translation.")
+    return key
+
+
+def _translate_with_provider(
+    provider: str,
+    segments: List[Dict[str, object]],
+    target_lang: str,
+    source_lang: str,
+    anthropic_model: Optional[str],
+    progress_callback=None,
+    should_cancel=None,
+) -> List[Dict[str, object]]:
+    provider_norm = (provider or "google").strip().lower()
+    src = source_lang if source_lang != "und" else None
+    if provider_norm == "anthropic":
+        model = anthropic_model or "claude-3-5-sonnet-latest"
+        return translate_segments_anthropic(
+            segments,
+            target_lang,
+            api_key=_anthropic_api_key(),
+            model=model,
+            source_language=src,
+            progress_callback=progress_callback,
+            should_cancel=should_cancel,
+        )
+    return translate_segments(
+        segments,
+        target_lang,
+        api_key=_google_api_key(),
+        source_language=src,
+        progress_callback=progress_callback,
+        should_cancel=should_cancel,
+    )
 
 
 def _create_job(app: Flask, payload: Dict[str, object]) -> str:
@@ -271,6 +313,8 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
     target_lang = (payload.get("target_lang") or "").strip() or source_lang
     mode = (payload.get("mode") or "use_existing").strip()
     existing_id = payload.get("existing_sub_id")
+    translate_provider = (payload.get("translate_provider") or app.config.get("TRANSLATE_PROVIDER_DEFAULT") or "google").strip()
+    anthropic_model = app.config.get("ANTHROPIC_MODEL")
 
     if not media_path:
         raise ValueError("Missing media_path")
@@ -288,7 +332,7 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
     if mode == "translate_existing":
         if not existing:
             raise ValueError("No existing subtitle available.")
-        _update_job(app, job_id, stage="translate", message="Translating existing subtitles")
+        _update_job(app, job_id, stage="translate", message=f"Translating existing subtitles ({translate_provider})")
         return _generate_from_existing(
             existing,
             source_lang,
@@ -296,6 +340,8 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
             Path(media_path),
             output_path_for,
             require_translate=True,
+            translate_provider=translate_provider,
+            anthropic_model=anthropic_model,
             progress_callback=lambda progress: _update_job(
                 app,
                 job_id,
@@ -342,12 +388,13 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
 
     outputs = [str(source_output)]
     if target_lang != source_lang:
-        _update_job(app, job_id, stage="translate", message="Translating subtitles")
-        translated = translate_segments(
-            segments,
-            target_lang,
-            api_key=_google_api_key(),
-            source_language=source_lang if source_lang != "und" else None,
+        _update_job(app, job_id, stage="translate", message=f"Translating subtitles ({translate_provider})")
+        translated = _translate_with_provider(
+            provider=translate_provider,
+            segments=segments,
+            target_lang=target_lang,
+            source_lang=source_lang,
+            anthropic_model=anthropic_model,
             progress_callback=lambda progress: _update_job(
                 app,
                 job_id,
@@ -458,13 +505,24 @@ def main() -> int:
     media_dir = args.media_dir or config.get("media_dir") or "/agent/workspace/media_test"
     endpoint = args.endpoint or config.get("stt_endpoint") or "https://stt.rtek.dev"
     index_path = config.get("index_path")
+    translate_provider_default = str(config.get("translate_provider_default") or "google")
+    anthropic_model = str(config.get("anthropic_model") or "claude-3-5-sonnet-latest")
     google_key = config.get("google_translate_api_key")
+    anthropic_key = config.get("anthropic_api_key")
     if google_key and not os.environ.get("GOOGLE_TRANSLATE_API_KEY"):
         os.environ["GOOGLE_TRANSLATE_API_KEY"] = str(google_key)
+    if anthropic_key and not os.environ.get("ANTHROPIC_API_KEY"):
+        os.environ["ANTHROPIC_API_KEY"] = str(anthropic_key)
     print(f"[subgen] using config_path={CONFIG_PATH}")
     print(f"[subgen] fallback config_path={FALLBACK_CONFIG_PATH}")
-    print(f"[subgen] config values: media_dir={media_dir} stt_endpoint={endpoint} index_path={index_path or 'media_dir/subgen.json'}")
+    print(
+        "[subgen] config values: "
+        f"media_dir={media_dir} stt_endpoint={endpoint} index_path={index_path or 'media_dir/subgen.json'} "
+        f"translate_provider_default={translate_provider_default} anthropic_model={anthropic_model}"
+    )
     app = create_app(str(media_dir), str(endpoint), str(index_path) if index_path else None)
+    app.config["TRANSLATE_PROVIDER_DEFAULT"] = translate_provider_default
+    app.config["ANTHROPIC_MODEL"] = anthropic_model
     app.run(host=args.host, port=args.port)
     return 0
 

@@ -9,6 +9,7 @@ const closeModalBtn = document.getElementById("closeModal");
 const sourceLangInput = document.getElementById("sourceLang");
 const targetLangInput = document.getElementById("targetLang");
 const translateTargetLangInput = document.getElementById("translateTargetLang");
+const translateProviderInput = document.getElementById("translateProvider");
 const modeSelect = document.getElementById("mode");
 const existingSubSelect = document.getElementById("existingSub");
 const runGenerateBtn = document.getElementById("runGenerate");
@@ -93,6 +94,7 @@ function openModal(item) {
   sourceLangInput.value = sourceLangInput.value || "sv";
   targetLangInput.value = targetLangInput.value || "sv";
   translateTargetLangInput.value = translateTargetLangInput.value || "en";
+  translateProviderInput.value = translateProviderInput.value || "google";
   const hasSubs = (item.sidecar_subs?.length || 0) + (item.embedded_subs?.length || 0) > 0;
   modeSelect.value = hasSubs ? "translate" : "transcribe";
   populateExistingSubs(item);
@@ -130,6 +132,7 @@ async function runGenerate() {
         mode: "translate_existing",
         target_lang: translateTargetLangInput.value.trim(),
         existing_sub_id: existingSubSelect.value || null,
+        translate_provider: translateProviderInput.value,
       };
     } else {
       const sourceLang = sourceLangInput.value.trim();
@@ -140,6 +143,7 @@ async function runGenerate() {
         source_lang: sourceLang,
         target_lang: targetLang,
         existing_sub_id: null,
+        translate_provider: translateProviderInput.value,
       };
     }
 
