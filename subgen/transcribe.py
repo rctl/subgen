@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
 
@@ -40,3 +41,103 @@ def transcribe_pcm(
     if not isinstance(payload, dict):
         raise RuntimeError("STT response was not a JSON object.")
     return payload
+
+
+def transcribe_media(
+    media_path: Path,
+    endpoint: str,
+    language: str,
+    api_key: Optional[str] = None,
+    chunk_seconds: int = 30,
+    overlap_seconds: int = 3,
+    sample_rate: int = 16000,
+    timeout: int = 120,
+    progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+) -> List[Dict[str, object]]:
+    from .media import start_ffmpeg_pcm
+    from .subtitles import normalize_text
+
+    bytes_per_sample = 2
+    chunk_bytes = sample_rate * bytes_per_sample * chunk_seconds
+    overlap_bytes = sample_rate * bytes_per_sample * overlap_seconds
+
+    process = start_ffmpeg_pcm(str(media_path), sample_rate)
+    if not process.stdout:
+        raise RuntimeError("ffmpeg did not provide stdout.")
+
+    def read_chunk(reader, size: int) -> bytes:
+        remaining = size
+        chunks: List[bytes] = []
+        while remaining > 0:
+            data = reader.read(remaining)
+            if not data:
+                break
+            chunks.append(data)
+            remaining -= len(data)
+        return b"".join(chunks)
+
+    segments: List[Dict[str, object]] = []
+    chunk_index = 0
+    overlap_tail = b""
+    last_norm = ""
+    last_end = 0.0
+
+    while True:
+        if should_cancel and should_cancel():
+            process.kill()
+            process.communicate()
+            raise RuntimeError("Job canceled.")
+
+        chunk = read_chunk(process.stdout, chunk_bytes)
+        if not chunk:
+            break
+
+        payload = overlap_tail + chunk if overlap_tail else chunk
+        overlap_used = overlap_seconds if overlap_tail else 0
+        offset = max(chunk_index * chunk_seconds - overlap_used, 0)
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "stage": "transcribe",
+                    "chunk_index": chunk_index + 1,
+                    "processed_seconds": (chunk_index + 1) * chunk_seconds,
+                }
+            )
+
+        result = transcribe_pcm(
+            endpoint,
+            payload,
+            sample_rate,
+            language=language,
+            api_key=api_key,
+            timeout=timeout,
+        )
+        for seg in result.get("segments", []):
+            start = float(seg.get("start", 0.0))
+            end = float(seg.get("end", 0.0))
+            text = str(seg.get("text", "")).strip()
+            if not text or end <= 0:
+                continue
+            if end <= overlap_used:
+                continue
+            if start < overlap_used:
+                start = overlap_used
+            if end <= start:
+                continue
+            prepared = {"start": start + offset, "end": end + offset, "text": text}
+            norm = normalize_text(prepared["text"])
+            if norm and norm == last_norm and prepared["start"] <= last_end + 0.1:
+                continue
+            segments.append(prepared)
+            last_norm = norm
+            last_end = float(prepared["end"])
+
+        overlap_tail = chunk[-overlap_bytes:] if overlap_bytes and len(chunk) >= overlap_bytes else chunk
+        chunk_index += 1
+
+    process.communicate()
+    if process.returncode not in (0, None):
+        raise RuntimeError("ffmpeg failed during transcription.")
+    return segments

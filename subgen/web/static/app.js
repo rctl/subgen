@@ -18,10 +18,9 @@ const translateFields = document.getElementById("translateFields");
 
 let mediaItems = [];
 let currentMedia = null;
-let scanStatusTimer = null;
-let scanWasRunning = false;
 let jobPollTimer = null;
 let hadActiveJobs = false;
+let lastJobs = [];
 
 function setScanStatus(message) {
   scanStatusEl.textContent = message;
@@ -31,7 +30,7 @@ async function fetchMedia(rescan = false) {
   const url = new URL("api/media", window.location.origin + window.location.pathname);
   if (rescan) {
     url.searchParams.set("rescan", "1");
-    setScanStatus("Rescan started...");
+    setScanStatus("Scan requested...");
   }
   const response = await fetch(url);
   const data = await response.json();
@@ -40,46 +39,13 @@ async function fetchMedia(rescan = false) {
     return;
   }
   mediaItems = data.items || [];
-  updateScanStatus(data.scan);
-  scanWasRunning = Boolean(data.scan && data.scan.running);
   renderList();
-}
-
-async function fetchScanStatus() {
-  const url = new URL("api/scan-status", window.location.origin + window.location.pathname);
-  const response = await fetch(url);
-  const data = await response.json();
-  updateScanStatus(data);
-  if (!data.running && scanWasRunning) {
-    fetchMedia(false);
-  }
-  scanWasRunning = Boolean(data.running);
-}
-
-function updateScanStatus(scan) {
-  if (!scan) {
-    setScanStatus(`${mediaItems.length} videos found.`);
-    return;
-  }
-  if (scan.running) {
-    const total = Number(scan.total_files || 0);
-    const scanned = Number(scan.scanned_files || 0);
-    const percent = total > 0 ? Math.floor((scanned / total) * 100) : 0;
-    setScanStatus(
-      `Scanning media: ${scanned}/${total || "?"} files (${percent}%), videos found: ${scan.scanned_videos || 0}`
-    );
-  } else if (scan.error) {
-    setScanStatus(`Scan failed: ${scan.error}`);
-  } else {
-    setScanStatus(`${mediaItems.length} videos found.`);
-  }
+  updateStatusFromJobs(lastJobs);
 }
 
 function renderList() {
   const query = searchInput.value.toLowerCase();
-  const filtered = mediaItems.filter((item) =>
-    item.title.toLowerCase().includes(query)
-  );
+  const filtered = mediaItems.filter((item) => item.title.toLowerCase().includes(query));
 
   mediaListEl.innerHTML = "";
   filtered.forEach((item) => {
@@ -159,53 +125,43 @@ function populateExistingSubs(item) {
 async function runGenerate() {
   if (!currentMedia) return;
   runGenerateBtn.disabled = true;
-  let payload = { media_path: currentMedia.path };
-  if (modeSelect.value === "translate") {
-    payload = {
-      ...payload,
-      mode: "translate_existing",
-      target_lang: translateTargetLangInput.value.trim(),
-      existing_sub_id: existingSubSelect.value || null,
-    };
-  } else {
-    const sourceLang = sourceLangInput.value.trim();
-    const targetLang = targetLangInput.value.trim() || sourceLang;
-    payload = {
-      ...payload,
-      mode: "transcribe",
-      source_lang: sourceLang,
-      target_lang: targetLang,
-      existing_sub_id: null,
-    };
-  }
+  try {
+    let payload = { media_path: currentMedia.path };
+    if (modeSelect.value === "translate") {
+      payload = {
+        ...payload,
+        mode: "translate_existing",
+        target_lang: translateTargetLangInput.value.trim(),
+        existing_sub_id: existingSubSelect.value || null,
+      };
+    } else {
+      const sourceLang = sourceLangInput.value.trim();
+      const targetLang = targetLangInput.value.trim() || sourceLang;
+      payload = {
+        ...payload,
+        mode: "transcribe",
+        source_lang: sourceLang,
+        target_lang: targetLang,
+        existing_sub_id: null,
+      };
+    }
 
-  const response = await fetch("api/subtitles/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json();
-  if (data.error) {
+    const response = await fetch("api/subtitles/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (data.error) {
+      setScanStatus(`Error: ${data.error}`);
+      return;
+    }
+    modal.classList.add("hidden");
+    await fetchJobs();
+  } finally {
     runGenerateBtn.disabled = false;
-    setScanStatus(`Error: ${data.error}`);
-    return;
   }
-  runGenerateBtn.disabled = false;
-  modal.classList.add("hidden");
-  fetchJobs();
 }
-
-searchInput.addEventListener("input", renderList);
-rescanBtn.addEventListener("click", () => fetchMedia(true));
-closeModalBtn.addEventListener("click", () => modal.classList.add("hidden"));
-runGenerateBtn.addEventListener("click", runGenerate);
-modeSelect.addEventListener("change", toggleModeFields);
-
-fetchMedia();
-populateLanguageOptions();
-scanStatusTimer = setInterval(fetchScanStatus, 1500);
-fetchJobs();
-jobPollTimer = setInterval(fetchJobs, 2000);
 
 function toggleModeFields() {
   const isTranslate = modeSelect.value === "translate";
@@ -256,12 +212,37 @@ async function fetchJobs() {
   const response = await fetch("api/jobs");
   const data = await response.json();
   const jobs = data.jobs || [];
+  lastJobs = jobs;
   renderJobs(jobs);
-  const activeNow = jobs.some((job) => job.status === "running" || job.status === "queued");
+  updateStatusFromJobs(jobs);
+
+  const activeNow = jobs.some((job) => ["queued", "running", "cancelling"].includes(job.status));
   if (!activeNow && hadActiveJobs) {
     fetchMedia(false);
   }
   hadActiveJobs = activeNow;
+}
+
+function updateStatusFromJobs(jobs) {
+  const scanJobs = jobs.filter((job) => job.type === "scan");
+  const activeScan = scanJobs.find((job) => ["queued", "running", "cancelling"].includes(job.status));
+  const recentScan = scanJobs.length ? scanJobs[0] : null;
+
+  if (activeScan) {
+    const pct = Number(activeScan.progress_percent || 0);
+    const msg = activeScan.message || "Scanning...";
+    setScanStatus(`Scan running ${pct > 0 ? `(${pct}%)` : ""}: ${msg}`);
+    return;
+  }
+  if (recentScan && recentScan.status === "failed") {
+    setScanStatus(`Scan failed: ${recentScan.error || "Unknown error"}`);
+    return;
+  }
+  if (recentScan && recentScan.status === "canceled") {
+    setScanStatus("Scan canceled.");
+    return;
+  }
+  setScanStatus(`${mediaItems.length} videos found.`);
 }
 
 function renderJobs(jobs) {
@@ -279,9 +260,14 @@ function renderJobs(jobs) {
     card.className = "job-card";
 
     const left = document.createElement("div");
+
+    const titleLine = document.createElement("div");
+    titleLine.className = "job-title";
+    titleLine.textContent = job.name || `${job.type || "job"} ${job.id}`;
+
     const topLine = document.createElement("div");
     topLine.className = "job-line";
-    if (job.status === "running" || job.status === "queued") {
+    if (["queued", "running", "cancelling"].includes(job.status)) {
       const spin = document.createElement("span");
       spin.className = "spinner small";
       topLine.appendChild(spin);
@@ -295,16 +281,29 @@ function renderJobs(jobs) {
     if (job.status === "failed") {
       subLine.classList.add("job-error");
       subLine.textContent = job.error || "Job failed";
-    } else if (job.message) {
-      subLine.textContent = job.message;
-    } else if (job.outputs && job.outputs.length) {
+    } else if (job.status === "completed" && job.outputs && job.outputs.length) {
       subLine.textContent = `Output: ${job.outputs.join(", ")}`;
     } else {
-      subLine.textContent = `Job ${job.id}`;
+      subLine.textContent = job.message || "";
     }
 
+    const progressLine = document.createElement("div");
+    progressLine.className = "job-sub";
+    const pct = Number(job.progress_percent || 0);
+    const current = Number(job.progress_current || 0);
+    const total = Number(job.progress_total || 0);
+    if (total > 0 || pct > 0) {
+      progressLine.textContent = total > 0 ? `Progress: ${current}/${total} (${pct}%)` : `Progress: ${pct}%`;
+    } else {
+      progressLine.textContent = "";
+    }
+
+    left.appendChild(titleLine);
     left.appendChild(topLine);
     left.appendChild(subLine);
+    if (progressLine.textContent) {
+      left.appendChild(progressLine);
+    }
 
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "job-delete";
@@ -319,3 +318,17 @@ function renderJobs(jobs) {
     jobsListEl.appendChild(card);
   });
 }
+
+searchInput.addEventListener("input", renderList);
+rescanBtn.addEventListener("click", async () => {
+  await fetchMedia(true);
+  fetchJobs();
+});
+closeModalBtn.addEventListener("click", () => modal.classList.add("hidden"));
+runGenerateBtn.addEventListener("click", runGenerate);
+modeSelect.addEventListener("change", toggleModeFields);
+
+populateLanguageOptions();
+fetchMedia();
+fetchJobs();
+jobPollTimer = setInterval(fetchJobs, 2000);

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional
 
 import requests
 
@@ -15,6 +15,8 @@ def translate_segments(
     source_language: Optional[str] = None,
     batch_size: int = 30,
     timeout: int = 120,
+    progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> List[Dict[str, object]]:
     if not api_key:
         raise ValueError("Google Translate API key is required for translation.")
@@ -22,7 +24,17 @@ def translate_segments(
     segment_list = list(segments)
     translated: List[Dict[str, object]] = []
     for start in range(0, len(segment_list), batch_size):
+        if should_cancel and should_cancel():
+            raise RuntimeError("Job canceled.")
         batch = segment_list[start : start + batch_size]
+        if progress_callback:
+            progress_callback(
+                {
+                    "stage": "translate",
+                    "processed_segments": min(start, len(segment_list)),
+                    "total_segments": len(segment_list),
+                }
+            )
         texts = [str(item.get("text", "")).strip() for item in batch]
         translated_texts = _translate_batch(
             texts,
@@ -51,6 +63,14 @@ def translate_segments(
                     "text": new_text,
                 }
             )
+    if progress_callback:
+        progress_callback(
+            {
+                "stage": "translate",
+                "processed_segments": len(segment_list),
+                "total_segments": len(segment_list),
+            }
+        )
     return translated
 
 

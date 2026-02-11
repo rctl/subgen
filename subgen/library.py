@@ -15,6 +15,7 @@ SUBTITLE_EXTENSIONS = {".srt", ".vtt", ".ass", ".ssa", ".sub"}
 def scan_media(
     base_dir: str,
     progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> List[Dict[str, object]]:
     base_path = Path(base_dir).resolve()
     items: List[Dict[str, object]] = []
@@ -22,7 +23,11 @@ def scan_media(
     scanned_files = 0
     scanned_videos = 0
     for root, _, files in os.walk(base_path):
+        if should_cancel and should_cancel():
+            raise RuntimeError("Job canceled.")
         for name in files:
+            if should_cancel and should_cancel():
+                raise RuntimeError("Job canceled.")
             path = Path(root) / name
             scanned_files += 1
             is_video = path.suffix.lower() in VIDEO_EXTENSIONS

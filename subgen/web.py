@@ -15,17 +15,11 @@ from flask import Flask, jsonify, request, send_from_directory
 from .library import (
     describe_media,
     extract_embedded_sub,
-    resolve_media_path,
     scan_media,
 )
-from .media import start_ffmpeg_pcm
-from .subtitles import format_srt, normalize_text, parse_srt
-from .transcribe import transcribe_pcm
+from .subtitles import format_srt, parse_srt
+from .transcribe import transcribe_media
 from .translate import translate_segments
-
-
-BYTES_PER_SAMPLE = 2  # s16le
-
 
 CONFIG_PATH = os.environ.get("SUBGEN_CONFIG_PATH", "/app/config.json")
 FALLBACK_CONFIG_PATH = os.path.join(os.getcwd(), "config.json")
@@ -52,20 +46,10 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     app.config["BASE_DIR"] = base_dir
     app.config["STT_ENDPOINT"] = stt_endpoint
     app.config["MEDIA_CACHE"] = []
-    app.config["SCAN_LOCK"] = threading.Lock()
     app.config["JOB_LOCK"] = threading.Lock()
     app.config["JOBS"] = {}
-    app.config["SCAN_STATE"] = {
-        "running": False,
-        "total_files": 0,
-        "scanned_files": 0,
-        "scanned_videos": 0,
-        "current_file": "",
-        "error": "",
-        "last_completed_at": None,
-    }
     print(f"[subgen] config base_dir={base_dir} stt_endpoint={stt_endpoint}")
-    _start_scan(app, force=True)
+    _start_scan(app)
 
     @app.route("/")
     def index():
@@ -79,19 +63,9 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     def api_media():
         rescan = request.args.get("rescan") == "1"
         if rescan:
-            _start_scan(app, force=True)
+            _start_scan(app)
         items = app.config.get("MEDIA_CACHE", [])
-        return jsonify(
-            {
-                "media_dir": app.config["BASE_DIR"],
-                "items": items,
-                "scan": dict(app.config["SCAN_STATE"]),
-            }
-        )
-
-    @app.route("/api/scan-status")
-    def api_scan_status():
-        return jsonify(dict(app.config["SCAN_STATE"]))
+        return jsonify({"media_dir": app.config["BASE_DIR"], "items": items})
 
     @app.route("/api/media/describe", methods=["POST"])
     def api_media_describe():
@@ -108,13 +82,6 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
         job_id = _create_job(app, data)
         return jsonify({"job_id": job_id})
 
-    @app.route("/api/jobs/<job_id>")
-    def api_job_status(job_id: str):
-        job = app.config["JOBS"].get(job_id)
-        if not job:
-            return jsonify({"error": "Job not found"}), 404
-        return jsonify(job)
-
     @app.route("/api/jobs")
     def api_jobs_list():
         jobs = list(app.config["JOBS"].values())
@@ -124,70 +91,19 @@ def create_app(base_dir: str, stt_endpoint: str) -> Flask:
     @app.route("/api/jobs/<job_id>", methods=["DELETE"])
     def api_job_delete(job_id: str):
         with app.config["JOB_LOCK"]:
-            removed = app.config["JOBS"].pop(job_id, None)
-        return jsonify({"removed": bool(removed)})
+            job = app.config["JOBS"].get(job_id)
+            if not job:
+                return jsonify({"removed": False, "canceled": False})
+            if job.get("status") in {"queued", "running"}:
+                job["cancel_requested"] = True
+                job["status"] = "cancelling"
+                job["message"] = "Cancellation requested"
+                job["updated_at"] = int(time.time())
+                return jsonify({"removed": False, "canceled": True})
+            app.config["JOBS"].pop(job_id, None)
+        return jsonify({"removed": True, "canceled": False})
 
     return app
-
-
-def transcribe_media(
-    media_path: Path,
-    endpoint: str,
-    language: str,
-    api_key: Optional[str] = None,
-    chunk_seconds: int = 30,
-    overlap_seconds: int = 3,
-    sample_rate: int = 16000,
-    timeout: int = 120,
-) -> List[Dict[str, object]]:
-    chunk_bytes = sample_rate * BYTES_PER_SAMPLE * chunk_seconds
-    overlap_bytes = sample_rate * BYTES_PER_SAMPLE * overlap_seconds
-
-    process = start_ffmpeg_pcm(str(media_path), sample_rate)
-    if not process.stdout:
-        raise RuntimeError("ffmpeg did not provide stdout.")
-
-    segments: List[Dict[str, object]] = []
-    chunk_index = 0
-    overlap_tail = b""
-    last_norm = ""
-    last_end = 0.0
-
-    while True:
-        chunk = _read_chunk(process.stdout, chunk_bytes)
-        if not chunk:
-            break
-
-        payload = overlap_tail + chunk if overlap_tail else chunk
-        overlap_used = overlap_seconds if overlap_tail else 0
-        offset = max(chunk_index * chunk_seconds - overlap_used, 0)
-
-        result = transcribe_pcm(
-            endpoint,
-            payload,
-            sample_rate,
-            language=language,
-            api_key=api_key,
-            timeout=timeout,
-        )
-        for seg in result.get("segments", []):
-            prepared = _segment_from_result(seg, offset, overlap_used)
-            if not prepared:
-                continue
-            norm = normalize_text(str(prepared["text"]))
-            if norm and norm == last_norm and prepared["start"] <= last_end + 0.1:
-                continue
-            segments.append(prepared)
-            last_norm = norm
-            last_end = float(prepared["end"])
-
-        overlap_tail = chunk[-overlap_bytes:] if overlap_bytes and len(chunk) >= overlap_bytes else chunk
-        chunk_index += 1
-
-    process.communicate()
-    if process.returncode not in (0, None):
-        raise RuntimeError("ffmpeg failed during transcription.")
-    return segments
 
 
 def _generate_from_existing(
@@ -197,6 +113,8 @@ def _generate_from_existing(
     media_path: Path,
     output_path_for,
     require_translate: bool = False,
+    progress_callback=None,
+    should_cancel=None,
 ) -> Dict[str, object]:
     temp_path = None
     try:
@@ -212,6 +130,8 @@ def _generate_from_existing(
         segments = parse_srt(source_path.read_text(encoding="utf-8", errors="ignore"))
         if not segments:
             return {"error": "Existing subtitle was empty."}
+        if should_cancel and should_cancel():
+            raise RuntimeError("Job canceled.")
 
         outputs: List[str] = []
         if target_lang == source_lang and not require_translate:
@@ -225,6 +145,8 @@ def _generate_from_existing(
             target_lang,
             api_key=_google_api_key(),
             source_language=source_lang if source_lang != "und" else None,
+            progress_callback=progress_callback,
+            should_cancel=should_cancel,
         )
         output = output_path_for(target_lang)
         output.write_text(format_srt(translated), encoding="utf-8")
@@ -254,21 +176,38 @@ def _google_api_key() -> str:
 
 
 def _create_job(app: Flask, payload: Dict[str, object]) -> str:
+    media_path = str(payload.get("media_path") or "")
+    mode = str(payload.get("mode") or "transcribe")
+    title = Path(media_path).stem if media_path else "Subtitle job"
+    action = "translate" if mode == "translate_existing" else "transcribe"
+    job_name = f"{title} ({action})"
+    job_type = "translate" if mode == "translate_existing" else "transcribe"
+    job_id = _create_job_record(app, job_type=job_type, name=job_name)
+    thread = threading.Thread(target=_run_generate_job, args=(app, job_id, payload), daemon=True)
+    thread.start()
+    return job_id
+
+
+def _create_job_record(app: Flask, job_type: str, name: str) -> str:
     job_id = str(uuid.uuid4())
     job = {
         "id": job_id,
+        "type": job_type,
+        "name": name,
         "status": "queued",
         "stage": "queued",
-        "message": "",
+        "message": "Queued",
+        "progress_current": 0,
+        "progress_total": 0,
+        "progress_percent": 0,
         "outputs": [],
         "error": "",
+        "cancel_requested": False,
         "created_at": int(time.time()),
         "updated_at": int(time.time()),
     }
     with app.config["JOB_LOCK"]:
         app.config["JOBS"][job_id] = job
-    thread = threading.Thread(target=_run_job, args=(app, job_id, payload), daemon=True)
-    thread.start()
     return job_id
 
 
@@ -281,10 +220,26 @@ def _update_job(app: Flask, job_id: str, **kwargs: object) -> None:
         job["updated_at"] = int(time.time())
 
 
-def _run_job(app: Flask, job_id: str, payload: Dict[str, object]) -> None:
+def _is_cancel_requested(app: Flask, job_id: str) -> bool:
+    with app.config["JOB_LOCK"]:
+        job = app.config["JOBS"].get(job_id)
+        return bool(job and job.get("cancel_requested"))
+
+
+def _finish_canceled(app: Flask, job_id: str) -> None:
+    _update_job(app, job_id, status="canceled", stage="canceled", message="Canceled")
+
+
+def _run_generate_job(app: Flask, job_id: str, payload: Dict[str, object]) -> None:
     try:
         _update_job(app, job_id, status="running", stage="init", message="Preparing job")
+        if _is_cancel_requested(app, job_id):
+            _finish_canceled(app, job_id)
+            return
         result = _generate_outputs(app, payload, job_id)
+        if _is_cancel_requested(app, job_id):
+            _finish_canceled(app, job_id)
+            return
         _update_job(
             app,
             job_id,
@@ -292,9 +247,15 @@ def _run_job(app: Flask, job_id: str, payload: Dict[str, object]) -> None:
             stage="done",
             message="Completed",
             outputs=result.get("outputs", []),
+            progress_current=100,
+            progress_total=100,
+            progress_percent=100,
         )
     except Exception as exc:
-        _update_job(app, job_id, status="failed", stage="error", error=str(exc))
+        if str(exc) == "Job canceled.":
+            _finish_canceled(app, job_id)
+            return
+        _update_job(app, job_id, status="failed", stage="error", error=str(exc), message="Failed")
 
 
 def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Dict[str, object]:
@@ -315,6 +276,7 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
         return output_dir / f"{stem}.gen_{lang}.srt"
 
     existing = _resolve_existing_sub(media, existing_id)
+    should_cancel = lambda: _is_cancel_requested(app, job_id)
 
     if mode == "translate_existing":
         if not existing:
@@ -327,6 +289,19 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
             Path(media_path),
             output_path_for,
             require_translate=True,
+            progress_callback=lambda progress: _update_job(
+                app,
+                job_id,
+                stage=str(progress.get("stage", "translate")),
+                message="Translating existing subtitles",
+                progress_current=int(progress.get("processed_segments", 0)),
+                progress_total=int(progress.get("total_segments", 0)),
+                progress_percent=_percent(
+                    int(progress.get("processed_segments", 0)),
+                    int(progress.get("total_segments", 0)),
+                ),
+            ),
+            should_cancel=should_cancel,
         )
 
     if mode != "transcribe":
@@ -337,6 +312,16 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
         Path(media_path),
         app.config["STT_ENDPOINT"],
         source_lang,
+        progress_callback=lambda progress: _update_job(
+            app,
+            job_id,
+            stage=str(progress.get("stage", "transcribe")),
+            message=f"Transcribing chunk {int(progress.get('chunk_index', 0))}",
+            progress_current=int(progress.get("processed_seconds", 0)),
+            progress_total=0,
+            progress_percent=0,
+        ),
+        should_cancel=should_cancel,
     )
     source_output = output_path_for(source_lang)
     source_output.write_text(format_srt(segments), encoding="utf-8")
@@ -349,6 +334,19 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
             target_lang,
             api_key=_google_api_key(),
             source_language=source_lang if source_lang != "und" else None,
+            progress_callback=lambda progress: _update_job(
+                app,
+                job_id,
+                stage=str(progress.get("stage", "translate")),
+                message="Translating subtitles",
+                progress_current=int(progress.get("processed_segments", 0)),
+                progress_total=int(progress.get("total_segments", 0)),
+                progress_percent=_percent(
+                    int(progress.get("processed_segments", 0)),
+                    int(progress.get("total_segments", 0)),
+                ),
+            ),
+            should_cancel=should_cancel,
         )
         target_output = output_path_for(target_lang)
         target_output.write_text(format_srt(translated), encoding="utf-8")
@@ -357,75 +355,65 @@ def _generate_outputs(app: Flask, payload: Dict[str, object], job_id: str) -> Di
     return {"outputs": outputs}
 
 
-def _start_scan(app: Flask, force: bool = False) -> None:
-    with app.config["SCAN_LOCK"]:
-        state = app.config["SCAN_STATE"]
-        if state["running"] and not force:
-            return
-        if state["running"] and force:
-            return
-        state["running"] = True
-        state["total_files"] = 0
-        state["scanned_files"] = 0
-        state["scanned_videos"] = 0
-        state["current_file"] = ""
-        state["error"] = ""
-        thread = threading.Thread(target=_scan_worker, args=(app,), daemon=True)
-        thread.start()
+def _percent(current: int, total: int) -> int:
+    if total <= 0:
+        return 0
+    return int(max(0, min(100, (current * 100) // total)))
 
 
-def _scan_worker(app: Flask) -> None:
+def _start_scan(app: Flask) -> None:
+    with app.config["JOB_LOCK"]:
+        for job in app.config["JOBS"].values():
+            if job.get("type") == "scan" and job.get("status") in {"queued", "running", "cancelling"}:
+                return
+    job_id = _create_job_record(app, job_type="scan", name="Media library scan")
+    thread = threading.Thread(target=_scan_worker, args=(app, job_id), daemon=True)
+    thread.start()
+
+
+def _scan_worker(app: Flask, job_id: str) -> None:
     print("[subgen] scanning media library...")
+    _update_job(app, job_id, status="running", stage="scan", message="Scanning media files")
 
     def on_progress(progress: Dict[str, object]) -> None:
-        state = app.config["SCAN_STATE"]
-        state["total_files"] = int(progress.get("total_files", 0))
-        state["scanned_files"] = int(progress.get("scanned_files", 0))
-        state["scanned_videos"] = int(progress.get("scanned_videos", 0))
-        state["current_file"] = str(progress.get("current_file", ""))
+        current = int(progress.get("scanned_files", 0))
+        total = int(progress.get("total_files", 0))
+        videos = int(progress.get("scanned_videos", 0))
+        current_file = str(progress.get("current_file", ""))
+        _update_job(
+            app,
+            job_id,
+            stage="scan",
+            message=f"Scanning {current}/{total or '?'} files, videos found: {videos}, latest: {Path(current_file).name}",
+            progress_current=current,
+            progress_total=total,
+            progress_percent=_percent(current, total),
+        )
 
     try:
-        items = scan_media(app.config["BASE_DIR"], progress_callback=on_progress)
+        items = scan_media(
+            app.config["BASE_DIR"],
+            progress_callback=on_progress,
+            should_cancel=lambda: _is_cancel_requested(app, job_id),
+        )
         app.config["MEDIA_CACHE"] = items
-        app.config["SCAN_STATE"]["last_completed_at"] = int(time.time())
         print(f"[subgen] scan complete: {len(items)} items")
+        _update_job(
+            app,
+            job_id,
+            status="completed",
+            stage="done",
+            message=f"Scan complete: {len(items)} videos found",
+            progress_current=100,
+            progress_total=100,
+            progress_percent=100,
+        )
     except Exception as exc:
-        app.config["SCAN_STATE"]["error"] = str(exc)
+        if str(exc) == "Job canceled.":
+            _finish_canceled(app, job_id)
+            return
         print(f"[subgen] scan failed: {exc}")
-    finally:
-        app.config["SCAN_STATE"]["running"] = False
-        app.config["SCAN_STATE"]["current_file"] = ""
-
-
-def _segment_from_result(segment: Dict[str, object], offset: float, overlap_seconds: float) -> Dict[str, object] | None:
-    start = float(segment.get("start", 0.0))
-    end = float(segment.get("end", 0.0))
-    text = str(segment.get("text", "")).strip()
-    if not text or end <= 0:
-        return None
-    if end <= overlap_seconds:
-        return None
-    if start < overlap_seconds:
-        start = overlap_seconds
-    if end <= start:
-        return None
-    return {
-        "start": start + offset,
-        "end": end + offset,
-        "text": text,
-    }
-
-
-def _read_chunk(reader, size: int) -> bytes:
-    remaining = size
-    chunks: List[bytes] = []
-    while remaining > 0:
-        data = reader.read(remaining)
-        if not data:
-            break
-        chunks.append(data)
-        remaining -= len(data)
-    return b"".join(chunks)
+        _update_job(app, job_id, status="failed", stage="error", error=str(exc), message="Scan failed")
 
 
 def main() -> int:

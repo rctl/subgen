@@ -129,6 +129,12 @@ main {
   color: var(--text);
 }
 
+.job-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
 .job-sub {
   font-size: 11px;
   color: var(--muted);
