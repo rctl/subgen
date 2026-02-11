@@ -64,8 +64,8 @@ def transcribe_media(
     bytes_per_sample = 2
     vad_threshold = 0.30
     vad_frame_ms = 30
-    vad_padding_ms = 450
-    vad_min_speech_ms = 180
+    vad_padding_ms = 350
+    vad_min_speech_ms = 600
     vad_min_gap_ms = 220
 
     try:
@@ -174,17 +174,38 @@ def transcribe_media(
                 flush=True,
             )
 
-            result = transcribe_pcm(
-                endpoint,
-                region_payload,
-                sample_rate,
-                language=language,
-                api_key=api_key,
-                timeout=timeout,
-            )
+            used_full_chunk_fallback = False
+            try:
+                result = transcribe_pcm(
+                    endpoint,
+                    region_payload,
+                    sample_rate,
+                    language=language,
+                    api_key=api_key,
+                    timeout=timeout,
+                )
+                result_offset = region_start
+            except RuntimeError as exc:
+                if not _is_retryable_stt_error(exc):
+                    raise
+                print(
+                    f"[subgen][stt] chunk={chunk_index + 1} region={region_index} retryable error; retrying with full chunk",
+                    flush=True,
+                )
+                result = transcribe_pcm(
+                    endpoint,
+                    payload,
+                    sample_rate,
+                    language=language,
+                    api_key=api_key,
+                    timeout=timeout,
+                )
+                result_offset = 0.0
+                used_full_chunk_fallback = True
+
             for seg in result.get("segments", []):
-                start = float(seg.get("start", 0.0)) + region_start
-                end = float(seg.get("end", 0.0)) + region_start
+                start = float(seg.get("start", 0.0)) + result_offset
+                end = float(seg.get("end", 0.0)) + result_offset
                 text = str(seg.get("text", "")).strip()
                 if not text or end <= 0:
                     continue
@@ -201,6 +222,9 @@ def transcribe_media(
                 segments.append(prepared)
                 last_norm = norm
                 last_end = float(prepared["end"])
+
+            if used_full_chunk_fallback:
+                break
 
         overlap_tail = chunk[-overlap_bytes:] if overlap_bytes and len(chunk) >= overlap_bytes else chunk
         chunk_index += 1
@@ -315,4 +339,26 @@ def _compute_regions_from_vad(
         end_s = (end_frame * frame_samples) / float(sample_rate)
         regions.append({"start": start_s, "end": end_s, "max_score": float(r["max_score"])})
 
-    return regions
+    if not regions:
+        return []
+
+    # Merge any overlaps introduced by padding so we avoid retranscribing the same audio.
+    regions.sort(key=lambda r: (float(r["start"]), float(r["end"])))
+    compact: List[Dict[str, float]] = [dict(regions[0])]
+    for region in regions[1:]:
+        prev = compact[-1]
+        if float(region["start"]) <= float(prev["end"]):
+            prev["end"] = max(float(prev["end"]), float(region["end"]))
+            prev["max_score"] = max(float(prev["max_score"]), float(region["max_score"]))
+        else:
+            compact.append(dict(region))
+    return compact
+
+
+def _is_retryable_stt_error(exc: RuntimeError) -> bool:
+    text = str(exc)
+    return (
+        "STT error 500" in text
+        or "key.size(1) == value.size(1)" in text
+        or "buffer size must be a multiple of element size" in text
+    )
